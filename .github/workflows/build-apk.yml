@@ -1,0 +1,104 @@
+name: Build & Publish Debug APK
+
+# 推送到 GitHub 后自动编译出 app-debug.apk 并发布到 Release（tag: debug-apk）
+# 做法对齐 islaany/DelayedSubPlayer：ubuntu 运行机预装完整 Android SDK + JDK，
+# 直接下载官方 Gradle 8.9 二进制发行版并用其中的 `gradle` 命令构建，
+# 同时把发行版自带的正确 wrapper 文件拷回仓库并提交（commit message 含 [skip ci] 避免递归触发）。
+#
+# 这样你不用开 Android Studio：每次 push 到 master 后，去 Releases 下载 app-debug.apk 即可装手机。
+on:
+  push:
+    branches: [ master ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Gradle 8.9 (official binary distribution)
+        run: |
+          set -euo pipefail
+          curl -sL -o /tmp/gradle-8.9-bin.zip https://services.gradle.org/distributions/gradle-8.9-bin.zip
+          unzip -q -o /tmp/gradle-8.9-bin.zip -d /opt/gradle
+          /opt/gradle/gradle-8.9/bin/gradle --version
+
+      - name: Restore valid wrapper from distribution (for repo cleanliness)
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          cp -f /opt/gradle/gradle-8.9/bin/gradlew ./gradlew
+          cp -f /opt/gradle/gradle-8.9/bin/gradlew.bat ./gradlew.bat
+          mkdir -p gradle/wrapper
+          cp -f /opt/gradle/gradle-8.9/gradle/wrapper/gradle-wrapper.jar gradle/wrapper/gradle-wrapper.jar
+          cp -f /opt/gradle/gradle-8.9/gradle/wrapper/gradle-wrapper.properties gradle/wrapper/gradle-wrapper.properties
+          chmod +x gradlew
+          echo "wrapper restored"
+
+      - name: Build debug APK
+        id: build
+        run: |
+          set -euo pipefail
+          /opt/gradle/gradle-8.9/bin/gradle :app:assembleDebug --no-daemon 2>&1 | tee build.log
+
+      - name: Verify APK exists
+        id: verify
+        run: |
+          set -euo pipefail
+          FILE=$(find app/build/outputs/apk/debug -name 'app-debug.apk' | head -1)
+          echo "APK=$FILE size=$(stat -c%s "$FILE")"
+          echo "file=$FILE" >> "$GITHUB_OUTPUT"
+
+      - name: Commit valid wrapper to repo (skip ci)
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add gradlew gradlew.bat gradle/wrapper/gradle-wrapper.jar gradle/wrapper/gradle-wrapper.properties
+          git diff --cached --quiet || git commit -m "chore: commit valid gradle wrapper (regenerated in CI) [skip ci]"
+          git push "https://${{ secrets.GITHUB_TOKEN }}@github.com/islaany/NovelTracker.git" HEAD:master
+
+      - name: Publish APK to Release
+        id: publish
+        if: steps.build.outcome == 'success'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          FILE="${{ steps.verify.outputs.file }}"
+          echo "Publishing $FILE"
+          gh release delete debug-apk -y --cleanup-tag 2>/dev/null || true
+          gh release create debug-apk "$FILE" \
+            --title "Debug APK (latest)" \
+            --prerelease \
+            --notes "Auto-built debug APK from ${{ github.sha }}"
+
+      - name: Diagnose on failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { execSync } = require('child_process');
+            const head = (p,n) => { try { return execSync('head -n ' + n + ' ' + p + ' 2>/dev/null || echo MISSING').toString(); } catch (e) { return String(e); } };
+            const tail = (p,n) => { try { return execSync('tail -n ' + n + ' ' + p + ' 2>/dev/null || echo MISSING').toString(); } catch (e) { return String(e); } };
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: 'CI diag #' + context.runNumber + ' build failed',
+              body: 'BUILD_HEAD:\n```\n' + head('build.log', 200) + '\n```\nBUILD_TAIL:\n```\n' + tail('build.log', 120) + '\n```'
+            });
