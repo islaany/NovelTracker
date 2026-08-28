@@ -107,7 +107,7 @@ class AddNovelViewModel(application: Application) : AndroidViewModel(application
                 highlights = r?.highlights ?: "",
                 source = r?.source ?: ""
             )
-            _selectedTags.value = (r?.tags ?: emptyList()).toSet()
+            _selectedTags.value = (r?.tags ?: emptyList<String>()).toSet()
             _step.value = AddStep.REVIEW
         }
     }
@@ -140,7 +140,7 @@ class AddNovelViewModel(application: Application) : AndroidViewModel(application
             tags = _selectedTags.value.toList(),
             source = d.source.ifBlank { null }
         )
-        return runCatching { repo.upsert(novel) }.getOrNull()?.takeIf { it > 0 }
+        return runCatching { repo.upsert(novel) }.getOrNull()?.takeIf { id -> id > 0L }
     }
 
     private fun Uri.toBitmap(context: Context): Bitmap? = runCatching {
