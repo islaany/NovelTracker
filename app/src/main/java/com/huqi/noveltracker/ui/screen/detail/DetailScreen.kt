@@ -23,6 +23,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Button
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -37,6 +38,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
 import coil.compose.AsyncImage
 import com.huqi.noveltracker.data.model.Novel
+import com.huqi.noveltracker.ui.component.CoverPlaceholder
 import com.huqi.noveltracker.ui.component.SectionCard
 import com.huqi.noveltracker.ui.component.TagChip
 
@@ -105,7 +107,7 @@ private fun DetailContent(novel: Novel, viewModel: DetailViewModel, modifier: Mo
                         modifier = Modifier.size(width = 96.dp, height = 138.dp)
                     )
                 } else {
-                    Text(novel.title.firstOrNull()?.toString() ?: "?", style = MaterialTheme.typography.titleLarge)
+                    CoverPlaceholder(title = novel.title, width = 96.dp, height = 138.dp)
                 }
             }
             Spacer(modifier = Modifier.width(16.dp))
@@ -123,12 +125,22 @@ private fun DetailContent(novel: Novel, viewModel: DetailViewModel, modifier: Mo
         }
 
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            OutlinedButton(onClick = viewModel::toggleReRead, modifier = Modifier.weight(1f)) {
-                Text(if (novel.wantReRead == true) "✓ 想再看" else "想再看")
-            }
-            OutlinedButton(onClick = viewModel::toggleRecommend, modifier = Modifier.weight(1f)) {
-                Text(if (novel.wantRecommend == true) "✓ 想推荐" else "想推荐")
-            }
+            if (novel.wantReRead == true)
+                Button(onClick = viewModel::toggleReRead, modifier = Modifier.weight(1f)) {
+                    Text("✓ 想再看")
+                }
+            else
+                OutlinedButton(onClick = viewModel::toggleReRead, modifier = Modifier.weight(1f)) {
+                    Text("想再看")
+                }
+            if (novel.wantRecommend == true)
+                Button(onClick = viewModel::toggleRecommend, modifier = Modifier.weight(1f)) {
+                    Text("✓ 想推荐")
+                }
+            else
+                OutlinedButton(onClick = viewModel::toggleRecommend, modifier = Modifier.weight(1f)) {
+                    Text("想推荐")
+                }
         }
 
         if (!novel.synopsis.isNullOrBlank())

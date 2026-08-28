@@ -18,4 +18,7 @@ interface NovelRepository {
 
     suspend fun upsertTag(tag: Tag)
     suspend fun deleteTag(tag: Tag)
+
+    /** Insert a few demo novels + tags on first launch so the UI is populated. */
+    suspend fun seedSampleData()
 }

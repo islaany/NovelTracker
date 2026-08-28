@@ -25,6 +25,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.huqi.noveltracker.data.model.Novel
+import com.huqi.noveltracker.ui.component.CoverPlaceholder
 
 @Composable
 fun NovelCard(
@@ -58,11 +59,7 @@ fun NovelCard(
                         modifier = Modifier.size(width = 64.dp, height = 92.dp)
                     )
                 } else {
-                    Text(
-                        text = novel.title.firstOrNull()?.toString() ?: "?",
-                        style = MaterialTheme.typography.titleLarge,
-                        color = MaterialTheme.colorScheme.primary
-                    )
+                    CoverPlaceholder(title = novel.title, width = 64.dp, height = 92.dp)
                 }
             }
 
