@@ -17,6 +17,7 @@ import kotlin.comparisons.compareBy
 import kotlin.comparisons.compareByDescending
 
 enum class SortMode { RECENT, TITLE, MAIN_FIRST }
+enum class ListMode { ALL, WANT_REREAD, WANT_RECOMMEND }
 
 class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -37,10 +38,35 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     private val _sortMode = MutableStateFlow(SortMode.RECENT)
     val sortMode: StateFlow<SortMode> = _sortMode.asStateFlow()
 
+    private val _listMode = MutableStateFlow(ListMode.ALL)
+    val listMode: StateFlow<ListMode> = _listMode.asStateFlow()
+
+    /**
+     * Tags actually used by at least one novel — keeps the home filter clean
+     * (no empty / redundant catalog entries piling up at the top).
+     */
+    val filterTags: StateFlow<List<Tag>> =
+        combine(_novels, tags) { novels, allTags ->
+            val used = novels.flatMap { it.mainTags + it.subTags }.toSet()
+            allTags.filter { it.name in used }
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    /** All novels the user marked 想推荐 (for one-tap export, independent of tag/query). */
+    val recommendNovels: StateFlow<List<Novel>> =
+        _novels.map { list -> list.filter { it.wantRecommend == true } }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     val filteredNovels: StateFlow<List<Novel>> =
-        combine(_novels, _selectedTag, _query, _sortMode) { list, tag, q, sort ->
+        combine(_novels, _selectedTag, _query, _sortMode, _listMode) { list, tag, q, sort, mode ->
+            // 0) List mode (我的书架 / 想再看 / 想推荐) from the left drawer.
+            var res = when (mode) {
+                ListMode.WANT_REREAD -> list.filter { it.wantReRead == true }
+                ListMode.WANT_RECOMMEND -> list.filter { it.wantRecommend == true }
+                else -> list
+            }
+
             // 1) Tag-chip filter (browse by tapping a genre pill).
-            var res = if (tag == null) list else list.filter { tag in it.mainTags || tag in it.subTags }
+            if (tag != null) res = res.filter { tag in it.mainTags || tag in it.subTags }
 
             // 2) Free-text search — matches main/sub tag names or the title.
             val query = q.trim()
@@ -72,7 +98,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     fun selectTag(tag: String?) { _selectedTag.value = tag }
     fun setQuery(text: String) { _query.value = text }
-    fun setSortMode(mode: SortMode) { _sortMode.value = mode }
+    fun setSortMode(m: SortMode) { _sortMode.value = m }
+    fun setListMode(m: ListMode) { _listMode.value = m }
 
     fun delete(novel: Novel) = viewModelScope.launch {
         repo.delete(novel)

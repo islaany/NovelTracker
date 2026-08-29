@@ -261,6 +261,7 @@ private fun ReviewStep(viewModel: AddNovelViewModel, onSave: () -> Unit) {
     val colorMap = catalogTags.associate { it.name to it.color }
     val displayTags = (catalogTags.map { it.name }.toSet() + mainTags + subTags).toList()
     val mainFull = mainTags.size >= 2
+    var customTag by remember { mutableStateOf("") }
 
     Column(
         modifier = Modifier.verticalScroll(rememberScrollState()),
@@ -359,6 +360,27 @@ private fun ReviewStep(viewModel: AddNovelViewModel, onSave: () -> Unit) {
                     onClick = { viewModel.toggleSub(name) }
                 )
             }
+        }
+
+        Spacer(modifier = Modifier.height(6.dp))
+        Text("找不到想要的标签？自定义一个", style = MaterialTheme.typography.labelMedium)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(
+                value = customTag,
+                onValueChange = { customTag = it },
+                label = { Text("自定义标签名") },
+                modifier = Modifier.weight(1f),
+                singleLine = true
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Button(
+                onClick = {
+                    if (customTag.isNotBlank()) {
+                        viewModel.addCustomSubTag(customTag)
+                        customTag = ""
+                    }
+                }
+            ) { Text("添加") }
         }
 
         Row(verticalAlignment = Alignment.CenterVertically) {

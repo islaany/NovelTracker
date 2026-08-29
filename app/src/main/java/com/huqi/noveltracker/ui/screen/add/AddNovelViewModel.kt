@@ -211,6 +211,20 @@ class AddNovelViewModel(application: Application) : AndroidViewModel(application
         _subTags.value = sub
     }
 
+    /**
+     * Add a free-form custom tag the user typed (covers genres missing from the
+     * built-in catalog). Upserted into the catalog so it becomes filterable, and
+     * immediately placed into the novel's sub-tags.
+     */
+    fun addCustomSubTag(raw: String) {
+        val name = raw.trim()
+        if (name.isBlank()) return
+        runCatching { repo.upsertTag(Tag(name = name, color = tagColor(name))) }
+        val sub = _subTags.value.toMutableSet()
+        sub.add(name)
+        _subTags.value = sub
+    }
+
     fun toggleWantReRead() { _wantReRead.value = !_wantReRead.value }
     fun toggleWantRecommend() { _wantRecommend.value = !_wantRecommend.value }
 

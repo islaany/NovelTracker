@@ -49,7 +49,7 @@ class SiliconFlowNovelSearchService(
         - synopsis：120字以内的剧情简介（世界观/主线/看点）
         - protagonist：主角名（多个用逗号分隔）
         - highlights：3-5条高光/名场面，每条以"· "开头，换行分隔
-        - tags：3-5个分类标签，必须从下面的题材库中选择最贴切的（不要自创新词，也不要用"灵气复苏"这类不在库里的词）：
+        - tags：3-5个分类标签，必须从下面的题材库中**原样挑选最贴切的词**（不要改写、不要造近义词、不要遗漏"文/流"等后缀，例如"都市异能"请拆成"都市"和"异能"两个库内词）：
         ${TagCatalog.promptList}
         只输出严格 JSON，不要任何解释或 Markdown 代码块，格式：
         {"title":"","author":"","synopsis":"","protagonist":"","highlights":"","tags":["",""]}
