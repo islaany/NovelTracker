@@ -17,8 +17,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import kotlin.math.maxOf
-import kotlin.math.minOf
 
 enum class AddStep { PICK, IMPORTING, REVIEW }
 enum class ImportPhase { OCR, SEARCH, DONE }
@@ -222,7 +220,8 @@ class AddNovelViewModel(application: Application) : AndroidViewModel(application
             // Downscale very large screenshots so OCR is fast and the whole image is
             // processed (ML Kit can otherwise be slow / truncate on huge bitmaps).
             val maxDim = 1600
-            val scale = minOf(1f, maxDim.toFloat() / maxOf(raw.width, raw.height))
+            val maxSide = if (raw.width > raw.height) raw.width else raw.height
+            val scale = if (maxSide > maxDim) maxDim.toFloat() / maxSide else 1f
             if (scale < 1f) {
                 Bitmap.createScaledBitmap(
                     raw,
