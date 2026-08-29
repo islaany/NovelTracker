@@ -11,6 +11,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -246,15 +248,16 @@ private fun ImportingStep(phase: ImportPhase) {
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ReviewStep(viewModel: AddNovelViewModel, onSave: () -> Unit) {
     val d by viewModel.draft.collectAsState()
     val ocrText by viewModel.ocrText.collectAsState()
-    val catalog = viewModel.tags.collectAsState().value.map { it.name }.toSet()
+    val catalogTags by viewModel.tags.collectAsState()
     val selectedTags by viewModel.selectedTags.collectAsState()
     val wantReRead by viewModel.wantReRead.collectAsState()
     val wantRecommend by viewModel.wantRecommend.collectAsState()
-    val displayTags = (catalog + selectedTags).toList()
+    val displayTags = (catalogTags.map { it.name }.toSet() + selectedTags).toList()
 
     Column(
         modifier = Modifier.verticalScroll(rememberScrollState()),
@@ -311,8 +314,14 @@ private fun ReviewStep(viewModel: AddNovelViewModel, onSave: () -> Unit) {
         LabeledField("主角", d.protagonist) { new -> viewModel.updateDraft { it.copy(protagonist = new) } }
         LabeledField("高光内容", d.highlights, multiline = true) { new -> viewModel.updateDraft { it.copy(highlights = new) } }
 
-        Text("标签", style = MaterialTheme.typography.labelMedium)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            "标签（AI 已自动勾选推荐，可自由增删）",
+            style = MaterialTheme.typography.labelMedium
+        )
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
             displayTags.forEach { name ->
                 val selected = name in selectedTags
                 TagChip(name = name, selected = selected, onClick = { viewModel.toggleTag(name) })

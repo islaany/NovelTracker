@@ -1,6 +1,7 @@
 package com.huqi.noveltracker.data.repository.impl
 
 import android.util.Log
+import com.huqi.noveltracker.data.model.TagCatalog
 import com.huqi.noveltracker.data.repository.NovelSearchResult
 import com.huqi.noveltracker.data.repository.NovelSearchService
 import kotlinx.coroutines.Dispatchers
@@ -48,7 +49,8 @@ class SiliconFlowNovelSearchService(
         - synopsis：120字以内的剧情简介（世界观/主线/看点）
         - protagonist：主角名（多个用逗号分隔）
         - highlights：3-5条高光/名场面，每条以"· "开头，换行分隔
-        - tags：3-5个分类标签（如 玄幻、言情、悬疑、科幻、仙侠、都市、历史、灵气复苏、重生、末世、西幻、权谋 等）
+        - tags：3-5个分类标签，必须从下面的题材库中选择最贴切的（不要自创新词，也不要用"灵气复苏"这类不在库里的词）：
+        ${TagCatalog.promptList}
         只输出严格 JSON，不要任何解释或 Markdown 代码块，格式：
         {"title":"","author":"","synopsis":"","protagonist":"","highlights":"","tags":["",""]}
     """.trimIndent()
@@ -114,7 +116,12 @@ class SiliconFlowNovelSearchService(
             val j = JSONObject(clean)
             val tags = mutableListOf<String>()
             j.optJSONArray("tags")?.let { arr ->
-                for (i in 0 until arr.length()) arr.optString(i).takeIf { it.isNotBlank() }?.let { tags.add(it) }
+                for (i in 0 until arr.length()) {
+                    arr.optString(i).takeIf { it.isNotBlank() }?.let { raw ->
+                        val norm = TagCatalog.normalize(raw)
+                        if (norm !in tags) tags.add(norm)
+                    }
+                }
             }
             NovelSearchResult(
                 title = j.optString("title").ifBlank { fallbackTitle },

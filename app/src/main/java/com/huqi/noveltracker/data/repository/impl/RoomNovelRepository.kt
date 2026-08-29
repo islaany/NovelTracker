@@ -6,6 +6,7 @@ import com.huqi.noveltracker.data.local.entity.toEntity
 import com.huqi.noveltracker.data.local.entity.toModel
 import com.huqi.noveltracker.data.model.Novel
 import com.huqi.noveltracker.data.model.Tag
+import com.huqi.noveltracker.data.model.TagCatalog
 import com.huqi.noveltracker.data.repository.NovelRepository
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -30,6 +31,10 @@ class RoomNovelRepository(
 
     override suspend fun upsertTag(tag: Tag) = tagDao.upsert(tag.toEntity())
     override suspend fun deleteTag(tag: Tag) = tagDao.delete(tag.toEntity())
+
+    override suspend fun ensureDefaultTags() {
+        TagCatalog.DEFAULT_GENRES.forEach { tagDao.upsert(it.toEntity()) }
+    }
 
     override suspend fun seedSampleData() {
         if (novelDao.observeAll().first().isNotEmpty()) return

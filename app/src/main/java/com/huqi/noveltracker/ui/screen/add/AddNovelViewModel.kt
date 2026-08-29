@@ -10,6 +10,7 @@ import androidx.lifecycle.viewModelScope
 import com.huqi.noveltracker.appContainer
 import com.huqi.noveltracker.data.model.Novel
 import com.huqi.noveltracker.data.model.Tag
+import com.huqi.noveltracker.data.model.TagCatalog
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -119,7 +120,11 @@ class AddNovelViewModel(application: Application) : AndroidViewModel(application
                     highlights = result?.highlights ?: "",
                     source = result?.source ?: ""
                 )
-                _selectedTags.value = (result?.tags ?: emptyList<String>()).toSet()
+                // Normalize AI tags onto the curated genre vocabulary so the
+                // selected set always matches what's filterable in the catalog.
+                _selectedTags.value = (result?.tags ?: emptyList<String>())
+                    .map { TagCatalog.normalize(it) }
+                    .toSet()
 
                 // 3) finished — show "导入完成" briefly, then advance to the editable review screen
                 _importPhase.value = ImportPhase.DONE
@@ -156,7 +161,11 @@ class AddNovelViewModel(application: Application) : AndroidViewModel(application
                     highlights = result?.highlights ?: "",
                     source = result?.source ?: ""
                 )
-                _selectedTags.value = (result?.tags ?: emptyList<String>()).toSet()
+                // Normalize AI tags onto the curated genre vocabulary so the
+                // selected set always matches what's filterable in the catalog.
+                _selectedTags.value = (result?.tags ?: emptyList<String>())
+                    .map { TagCatalog.normalize(it) }
+                    .toSet()
                 _importPhase.value = ImportPhase.DONE
                 delay(900)
                 _step.value = AddStep.REVIEW

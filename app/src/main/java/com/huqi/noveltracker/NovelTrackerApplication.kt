@@ -29,6 +29,10 @@ class NovelTrackerApplication : Application() {
             novelRepository = RoomNovelRepository(database.novelDao(), database.tagDao())
         )
 
+        // Seed the curated genre vocabulary on every launch (idempotent; only adds,
+        // never wipes user tags) so the tag catalog is always selectable.
+        scope.launch { runCatching { container.novelRepository.ensureDefaultTags() } }
+
         // Seed a few demo novels on first launch so the UI is populated for review.
         val prefs = getSharedPreferences("noveltracker_prefs", MODE_PRIVATE)
         if (!prefs.getBoolean("seeded", false)) {
