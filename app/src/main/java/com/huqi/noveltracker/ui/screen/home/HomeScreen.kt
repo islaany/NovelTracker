@@ -161,7 +161,7 @@ fun HomeScreen(
                             singleLine = true,
                             leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                             trailingIcon = if (query.isNotEmpty()) {
-                                @Composable {
+                                {
                                     IconButton(onClick = { viewModel.setQuery("") }) {
                                         Icon(Icons.Default.Close, contentDescription = "清除")
                                     }
