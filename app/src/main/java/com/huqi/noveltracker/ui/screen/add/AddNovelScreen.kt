@@ -23,7 +23,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -38,6 +40,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -125,14 +128,19 @@ fun AddNovelScreen(
                 AddStep.IMPORTING -> ImportingStep(phase = importPhase)
                 AddStep.REVIEW -> ReviewStep(
                     viewModel = viewModel,
-                    onSave = {
+                    onSave = { action ->
                         scope.launch {
-                            val id = viewModel.save()
+                            val id = viewModel.save(action)
                             if (id != null) {
                                 navController.navigate(Screen.Detail.createRoute(id)) {
                                     popUpTo(Screen.Home.route)
                                 }
                             }
+                        }
+                    },
+                    onViewExisting = { id ->
+                        navController.navigate(Screen.Detail.createRoute(id)) {
+                            popUpTo(Screen.Home.route)
                         }
                     }
                 )
@@ -251,7 +259,11 @@ private fun ImportingStep(phase: ImportPhase) {
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun ReviewStep(viewModel: AddNovelViewModel, onSave: () -> Unit) {
+private fun ReviewStep(
+    viewModel: AddNovelViewModel,
+    onSave: (SaveAction) -> Unit,
+    onViewExisting: (Long) -> Unit
+) {
     val d by viewModel.draft.collectAsState()
     val ocrText by viewModel.ocrText.collectAsState()
     val catalogTags by viewModel.tags.collectAsState()
@@ -259,10 +271,19 @@ private fun ReviewStep(viewModel: AddNovelViewModel, onSave: () -> Unit) {
     val subTags by viewModel.subTags.collectAsState()
     val wantReRead by viewModel.wantReRead.collectAsState()
     val wantRecommend by viewModel.wantRecommend.collectAsState()
+    val tagQuery by viewModel.tagQuery.collectAsState()
+    val duplicate by viewModel.duplicate.collectAsState()
     val colorMap = catalogTags.associate { it.name to it.color }
-    val displayTags = (catalogTags.map { it.name }.toSet() + mainTags + subTags).toList()
+
+    val allTagNames = (catalogTags.map { it.name }.toSet() + mainTags + subTags).toList()
+    val q = tagQuery.trim()
+    // Selected first, unselected after — the point is to see at a glance what the AI
+    // picked for you without hunting through ~120 chips.
+    val orderedTags = allTagNames
+        .filter { q.isEmpty() || it.contains(q, ignoreCase = true) }
+        .sortedBy { n -> if (n in mainTags) 0 else if (n in subTags) 1 else 2 }
     val mainFull = mainTags.size >= 2
-    var customTag by remember { mutableStateOf("") }
+    val queryHasExactMatch = allTagNames.any { it.equals(q, ignoreCase = true) }
 
     Column(
         modifier = Modifier.verticalScroll(rememberScrollState()),
@@ -293,6 +314,40 @@ private fun ReviewStep(viewModel: AddNovelViewModel, onSave: () -> Unit) {
             }
         }
 
+        // 重复导入提醒：这本书可能以前导过，避免书架上出现两本一样的
+        duplicate?.let { existing ->
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.tertiaryContainer
+                ),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Text(
+                        "书架里已有一本《${existing.title}》",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onTertiaryContainer
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        "添加于 ${formatDate(existing.addedAt)} · 主标签：" +
+                            existing.mainTags.joinToString("、").ifBlank { "无" },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.8f)
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        "保存时默认用新内容更新它，不会多出一本重复的书。",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.8f)
+                    )
+                    TextButton(onClick = { onViewExisting(existing.id) }) {
+                        Text("去看已有的那本")
+                    }
+                }
+            }
+        }
+
         // 让 AI 实际看到的「识别原文」可见，便于核对 OCR 是否读对、一起定位问题
         Card(
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
@@ -319,10 +374,34 @@ private fun ReviewStep(viewModel: AddNovelViewModel, onSave: () -> Unit) {
         LabeledField("主角", d.protagonist) { new -> viewModel.updateDraft { it.copy(protagonist = new) } }
         LabeledField("高光内容", d.highlights, multiline = true) { new -> viewModel.updateDraft { it.copy(highlights = new) } }
 
+        // ── 标签区：搜索定位 + 已选优先 ─────────────────────────────
+        OutlinedTextField(
+            value = tagQuery,
+            onValueChange = { viewModel.setTagQuery(it) },
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("搜索标签，如：破镜、年下、ABO") },
+            singleLine = true,
+            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+            trailingIcon = if (tagQuery.isNotEmpty()) {
+                {
+                    IconButton(onClick = { viewModel.setTagQuery("") }) {
+                        Icon(Icons.Default.Close, contentDescription = "清除")
+                    }
+                }
+            } else null
+        )
+
         Text(
             "主标签（最多 2 个，决定归类与排序优先）",
             style = MaterialTheme.typography.labelMedium
         )
+        if (mainTags.isEmpty()) {
+            Text(
+                "· 还没选主标签：在下方点标签加入副标签后，再点它上面的「↑」升为主标签",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+            )
+        }
         if (mainFull) {
             Text(
                 "· 主标签已满（最多 2 个），先取消一个可再选",
@@ -334,14 +413,13 @@ private fun ReviewStep(viewModel: AddNovelViewModel, onSave: () -> Unit) {
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            displayTags.forEach { name ->
-                val isMain = name in mainTags
-                val disabled = !isMain && mainFull
+            mainTags.forEach { name ->
                 TagChip(
                     name = name,
                     colorHex = colorMap[name],
-                    filled = isMain,
-                    onClick = if (disabled) null else ({ viewModel.toggleMain(name) })
+                    filled = true,
+                    actionLabel = "✕",
+                    onAction = { viewModel.toggleMain(name) }
                 )
             }
         }
@@ -352,36 +430,33 @@ private fun ReviewStep(viewModel: AddNovelViewModel, onSave: () -> Unit) {
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            displayTags.filter { it !in mainTags }.forEach { name ->
+            orderedTags.filter { it !in mainTags }.forEach { name ->
                 val isSub = name in subTags
                 TagChip(
                     name = name,
                     colorHex = colorMap[name],
                     selected = isSub,
-                    onClick = { viewModel.toggleSub(name) }
+                    onClick = { viewModel.toggleSub(name) },
+                    actionLabel = if (isSub) "↑" else null,
+                    onAction = if (isSub) ({ viewModel.promoteSubToMain(name) }) else null
                 )
             }
         }
 
-        Spacer(modifier = Modifier.height(6.dp))
-        Text("找不到想要的标签？自定义一个", style = MaterialTheme.typography.labelMedium)
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            OutlinedTextField(
-                value = customTag,
-                onValueChange = { customTag = it },
-                label = { Text("自定义标签名") },
-                modifier = Modifier.weight(1f),
-                singleLine = true
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            Button(
-                onClick = {
-                    if (customTag.isNotBlank()) {
-                        viewModel.addCustomSubTag(customTag)
-                        customTag = ""
-                    }
-                }
-            ) { Text("添加") }
+        // 库里没有这个词 → 直接新建，并自己决定进主标签还是副标签
+        if (q.isNotEmpty() && !queryHasExactMatch) {
+            Spacer(modifier = Modifier.height(6.dp))
+            Text("库里没有「$q」", style = MaterialTheme.typography.labelMedium)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = { viewModel.addCustomTag(q, asMain = true); viewModel.setTagQuery("") },
+                    modifier = Modifier.weight(1f)
+                ) { Text("＋ 新建并加到主标签") }
+                OutlinedButton(
+                    onClick = { viewModel.addCustomTag(q, asMain = false); viewModel.setTagQuery("") },
+                    modifier = Modifier.weight(1f)
+                ) { Text("＋ 新建并加到副标签") }
+            }
         }
 
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -401,12 +476,26 @@ private fun ReviewStep(viewModel: AddNovelViewModel, onSave: () -> Unit) {
             Text(" 重新导入这张截图")
         }
 
-        Button(onClick = onSave, modifier = Modifier.fillMaxWidth()) {
-            Icon(Icons.Default.Check, contentDescription = null)
-            Text(" 保存到书架")
+        if (duplicate == null) {
+            Button(onClick = { onSave(SaveAction.CREATE) }, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Default.Check, contentDescription = null)
+                Text(" 保存到书架")
+            }
+        } else {
+            Button(onClick = { onSave(SaveAction.UPDATE_EXISTING) }, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Default.Check, contentDescription = null)
+                Text(" 用新内容更新已有的那本（推荐）")
+            }
+            OutlinedButton(onClick = { onSave(SaveAction.CREATE) }, modifier = Modifier.fillMaxWidth()) {
+                Text("仍然存成新的一本")
+            }
         }
     }
 }
+
+private fun formatDate(ms: Long): String =
+    java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
+        .format(java.util.Date(ms))
 
 @Composable
 private fun LabeledField(

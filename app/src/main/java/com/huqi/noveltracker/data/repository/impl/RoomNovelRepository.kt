@@ -26,6 +26,10 @@ class RoomNovelRepository(
     override fun observeTags(): Flow<List<Tag>> =
         tagDao.observeAll().map { list -> list.map { it.toModel() } }
 
+    override suspend fun getAll(): List<Novel> = novelDao.getAll().map { it.toModel() }
+
+    override suspend fun getAllTags(): List<Tag> = tagDao.observeAll().first().map { it.toModel() }
+
     override suspend fun upsert(novel: Novel): Long = novelDao.upsertAndGetId(novel.toEntity())
     override suspend fun delete(novel: Novel) = novelDao.delete(novel.toEntity())
 

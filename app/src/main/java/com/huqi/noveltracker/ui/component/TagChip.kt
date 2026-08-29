@@ -33,7 +33,10 @@ fun TagChip(
     colorHex: String? = null,
     selected: Boolean = false,
     filled: Boolean = false,
-    onClick: (() -> Unit)? = null
+    onClick: (() -> Unit)? = null,
+    /** Small trailing action, e.g. "✕" remove or "↑" promote to main tag. */
+    actionLabel: String? = null,
+    onAction: (() -> Unit)? = null
 ) {
     val color = runCatching { colorHex?.let { Color(android.graphics.Color.parseColor(it)) } }
         .getOrDefault(null)
@@ -75,5 +78,16 @@ fun TagChip(
             style = MaterialTheme.typography.labelMedium,
             color = textColor
         )
+        if (actionLabel != null) {
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+                text = actionLabel,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.then(
+                    if (onAction != null) Modifier.clickable(onClick = onAction) else Modifier
+                )
+            )
+        }
     }
 }

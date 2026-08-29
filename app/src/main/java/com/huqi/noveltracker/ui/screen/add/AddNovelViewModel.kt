@@ -11,6 +11,7 @@ import com.huqi.noveltracker.appContainer
 import com.huqi.noveltracker.data.model.Novel
 import com.huqi.noveltracker.data.model.Tag
 import com.huqi.noveltracker.data.model.TagCatalog
+import com.huqi.noveltracker.util.BackupManager
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -21,6 +22,9 @@ import kotlinx.coroutines.launch
 
 enum class AddStep { PICK, IMPORTING, REVIEW }
 enum class ImportPhase { OCR, SEARCH, DONE }
+
+/** What "save" should do when the same book already exists in the library. */
+enum class SaveAction { CREATE, UPDATE_EXISTING }
 
 data class AddDraft(
     val title: String = "",
@@ -68,10 +72,19 @@ class AddNovelViewModel(application: Application) : AndroidViewModel(application
     private val _wantRecommend = MutableStateFlow(false)
     val wantRecommend: StateFlow<Boolean> = _wantRecommend.asStateFlow()
 
+    /** Filters the tag picker so the user can find a tag instead of scrolling ~120 chips. */
+    private val _tagQuery = MutableStateFlow("")
+    val tagQuery: StateFlow<String> = _tagQuery.asStateFlow()
+
+    /** Set when the imported title already exists in the library (duplicate warning). */
+    private val _duplicate = MutableStateFlow<Novel?>(null)
+    val duplicate: StateFlow<Novel?> = _duplicate.asStateFlow()
+
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error.asStateFlow()
 
     fun clearError() { _error.value = null }
+    fun setTagQuery(q: String) { _tagQuery.value = q }
 
     // ---- flow ----
 
@@ -112,6 +125,7 @@ class AddNovelViewModel(application: Application) : AndroidViewModel(application
                     _step.value = AddStep.PICK
                     return@launch
                 }
+                feedUserVocabulary()
                 val result = runCatching { searchService.search(query) }.getOrNull()
 
                 _draft.value = AddDraft(
@@ -131,6 +145,7 @@ class AddNovelViewModel(application: Application) : AndroidViewModel(application
                     .map { TagCatalog.normalize(it) }
                     .toSet()
                 _mainTags.value = emptySet()
+                _duplicate.value = findDuplicate(result?.title ?: firstLine)
 
                 // 3) finished — show "导入完成" briefly, then advance to the editable review screen
                 _importPhase.value = ImportPhase.DONE
@@ -157,6 +172,7 @@ class AddNovelViewModel(application: Application) : AndroidViewModel(application
         _importPhase.value = ImportPhase.SEARCH
         viewModelScope.launch {
             try {
+                feedUserVocabulary()
                 val result = runCatching { searchService.search(title) }.getOrNull()
                 _draft.value = AddDraft(
                     title = result?.title ?: title,
@@ -167,14 +183,11 @@ class AddNovelViewModel(application: Application) : AndroidViewModel(application
                     highlights = result?.highlights ?: "",
                     source = result?.source ?: ""
                 )
-                // Normalize AI tags onto the curated genre vocabulary so the
-                // selected set always matches what's filterable in the catalog.
-                // AI-suggested tags land in sub-tags; the user promotes up to 2
-                // to main tags in the review screen.
                 _subTags.value = (result?.tags ?: emptyList<String>())
                     .map { TagCatalog.normalize(it) }
                     .toSet()
                 _mainTags.value = emptySet()
+                _duplicate.value = findDuplicate(result?.title ?: title)
                 _importPhase.value = ImportPhase.DONE
                 delay(900)
                 _step.value = AddStep.REVIEW
@@ -195,7 +208,7 @@ class AddNovelViewModel(application: Application) : AndroidViewModel(application
         if (main.contains(name)) {
             main.remove(name)
         } else {
-            if (main.size >= 2) return // 主标签最多 2 个
+            if (main.size >= 2) { _error.value = "主标签最多 2 个，先取消一个"; return }
             main.add(name)
             val sub = _subTags.value.toMutableSet()
             sub.remove(name)
@@ -211,27 +224,65 @@ class AddNovelViewModel(application: Application) : AndroidViewModel(application
         _subTags.value = sub
     }
 
-    /**
-     * Add a free-form custom tag the user typed (covers genres missing from the
-     * built-in catalog). Upserted into the catalog so it becomes filterable, and
-     * immediately placed into the novel's sub-tags.
-     */
-    fun addCustomSubTag(raw: String) {
-        val name = raw.trim()
-        if (name.isBlank()) return
-        // upsertTag is suspend — fire it on the viewmodel scope; the sub-tag set is
-        // updated synchronously so the chip appears immediately.
-        viewModelScope.launch { runCatching { repo.upsertTag(Tag(name = name, color = tagColor(name))) } }
+    /** Promote an existing sub-tag to a main tag (respects the max-2 rule). */
+    fun promoteSubToMain(name: String) {
+        val main = _mainTags.value.toMutableSet()
+        if (main.contains(name)) return
+        if (main.size >= 2) { _error.value = "主标签最多 2 个，先取消一个"; return }
+        main.add(name)
+        _mainTags.value = main
+        val sub = _subTags.value.toMutableSet()
+        sub.remove(name)
+        _subTags.value = sub
+    }
+
+    /** Move a main tag back down into the sub-tags. */
+    fun demoteMainToSub(name: String) {
+        val main = _mainTags.value.toMutableSet()
+        if (!main.remove(name)) return
+        _mainTags.value = main
         val sub = _subTags.value.toMutableSet()
         sub.add(name)
         _subTags.value = sub
     }
 
+    /**
+     * Create a tag the user typed and place it in main- or sub-tags as requested.
+     * This is the fix for "custom tags always landed in sub-tags".
+     */
+    fun addCustomTag(raw: String, asMain: Boolean) {
+        val name = raw.trim()
+        if (name.isBlank()) return
+        viewModelScope.launch { runCatching { repo.upsertTag(Tag(name = name, color = tagColor(name))) } }
+        if (asMain) {
+            val main = _mainTags.value.toMutableSet()
+            if (!main.contains(name) && main.size >= 2) {
+                _error.value = "主标签最多 2 个，先取消一个"
+                return
+            }
+            main.add(name)
+            _mainTags.value = main
+            val sub = _subTags.value.toMutableSet()
+            sub.remove(name)
+            _subTags.value = sub
+        } else {
+            val sub = _subTags.value.toMutableSet()
+            sub.add(name)
+            _subTags.value = sub
+        }
+    }
+
     fun toggleWantReRead() { _wantReRead.value = !_wantReRead.value }
     fun toggleWantRecommend() { _wantRecommend.value = !_wantRecommend.value }
 
-    /** Persists the record. Returns the new id, or null on failure. */
-    suspend fun save(): Long? {
+    /**
+     * Persists the record.
+     * - [SaveAction.CREATE] always inserts a new row.
+     * - [SaveAction.UPDATE_EXISTING] merges the new data into the duplicate we
+     *   detected (non-blank new fields win, tags are unioned, id/add time kept).
+     * Returns the row id, or null on failure.
+     */
+    suspend fun save(action: SaveAction = SaveAction.CREATE): Long? {
         val d = _draft.value
         val finalTitle = d.title.ifBlank { _ocrText.value.lines().firstOrNull { it.isNotBlank() } ?: "" }
         val main = _mainTags.value.filter { it.isNotBlank() }
@@ -240,6 +291,27 @@ class AddNovelViewModel(application: Application) : AndroidViewModel(application
         (main + sub).forEach { name ->
             runCatching { repo.upsertTag(Tag(name = name, color = tagColor(name))) }
         }
+
+        val existing = _duplicate.value
+        if (action == SaveAction.UPDATE_EXISTING && existing != null) {
+            val mergedMain = (existing.mainTags + main).distinct().take(2)
+            val mergedSub = (existing.subTags + sub).distinct().filter { it !in mergedMain }
+            val merged = existing.copy(
+                title = finalTitle.ifBlank { existing.title },
+                author = d.author.takeIf { it.isNotBlank() } ?: existing.author,
+                coverUrl = d.coverUrl.takeIf { it.isNotBlank() } ?: existing.coverUrl,
+                synopsis = d.synopsis.takeIf { it.isNotBlank() } ?: existing.synopsis,
+                protagonist = d.protagonist.takeIf { it.isNotBlank() } ?: existing.protagonist,
+                highlights = d.highlights.takeIf { it.isNotBlank() } ?: existing.highlights,
+                wantReRead = _wantReRead.value || existing.wantReRead == true,
+                wantRecommend = _wantRecommend.value || existing.wantRecommend == true,
+                mainTags = mergedMain,
+                subTags = mergedSub,
+                source = d.source.takeIf { it.isNotBlank() } ?: existing.source
+            )
+            return runCatching { repo.upsert(merged) }.getOrNull()
+        }
+
         val novel = Novel(
             title = finalTitle,
             author = d.author.ifBlank { null },
@@ -255,6 +327,36 @@ class AddNovelViewModel(application: Application) : AndroidViewModel(application
         )
         return runCatching { repo.upsert(novel) }.getOrNull()?.takeIf { id -> id > 0L }
     }
+
+    // ---- helpers ----
+
+    /**
+     * Feed the user's own words (tags they created or kept) back to the model so it
+     * starts preferring their vocabulary — the "personal dictionary" feedback loop.
+     */
+    private suspend fun feedUserVocabulary() {
+        val custom = runCatching { repo.getAllTags() }.getOrDefault(emptyList())
+            .map { it.name }
+            .filter { !TagCatalog.isBuiltIn(it) }
+        searchService.setUserVocabulary(custom)
+    }
+
+    /** Exact title match first, then a conservative prefix/contains match. */
+    private suspend fun findDuplicate(title: String): Novel? {
+        val key = normalizeTitle(title)
+        if (key.isBlank()) return null
+        val all = runCatching { repo.getAll() }.getOrDefault(emptyList())
+        all.firstOrNull { normalizeTitle(it.title) == key }?.let { return it }
+        return all.firstOrNull { n ->
+            val k = normalizeTitle(n.title)
+            k.isNotBlank() &&
+                (k.startsWith(key) || key.startsWith(k)) &&
+                (k.length - key.length) in -2..6
+        }
+    }
+
+    /** Delegates to the shared helper so backup-restore and duplicate check agree. */
+    private fun normalizeTitle(t: String): String = BackupManager.normalizeTitle(t)
 
     /** Deterministic pleasant color for a tag name so the catalog chips look varied. */
     private fun tagColor(name: String): String {

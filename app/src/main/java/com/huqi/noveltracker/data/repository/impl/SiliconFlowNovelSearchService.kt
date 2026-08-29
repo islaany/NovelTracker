@@ -40,7 +40,21 @@ class SiliconFlowNovelSearchService(
 
     private val mediaType = "application/json".toMediaType()
 
-    private val systemPrompt = """
+    /**
+     * Words the user has created or kept outside the built-in catalog. Fed back into
+     * the prompt so the model gradually learns the user's own vocabulary (e.g.
+     * BL-specific words it would otherwise never produce) while the built-in list
+     * still guarantees every tag stays filterable.
+     */
+    var userVocabulary: List<String> = emptyList()
+
+    override fun setUserVocabulary(words: List<String>) { userVocabulary = words }
+
+    private fun buildSystemPrompt(): String {
+        val extra = userVocabulary.map { it.trim() }.filter { it.isNotBlank() }.distinct()
+        val vocab = if (extra.isEmpty()) TagCatalog.promptList
+        else TagCatalog.promptList + "、" + extra.joinToString("、")
+        return """
         你是一个小说资料助手。用户会给你一段从手机阅读软件截图里 OCR 出来的文字（可能包含：页面顶部/书籍信息栏的书名、章节标题如"第一章 xxx"、作者、简介片段、正文段落等噪声）。
         请从中准确识别这本小说的：
         - 书名（重要：优先取页面最上方或书籍信息栏里的书名；不要把"第一章 xxx"这种章节标题当成书名。若分辨不清，取正文前最像书名的那一行）
@@ -50,10 +64,11 @@ class SiliconFlowNovelSearchService(
         - protagonist：主角名（多个用逗号分隔）
         - highlights：3-5条高光/名场面，每条以"· "开头，换行分隔
         - tags：3-5个分类标签，必须从下面的题材库中**原样挑选最贴切的词**（不要改写、不要造近义词、不要遗漏"文/流"等后缀，例如"都市异能"请拆成"都市"和"异能"两个库内词）：
-        ${TagCatalog.promptList}
+        $vocab
         只输出严格 JSON，不要任何解释或 Markdown 代码块，格式：
         {"title":"","author":"","synopsis":"","protagonist":"","highlights":"","tags":["",""]}
-    """.trimIndent()
+        """.trimIndent()
+    }
 
     override suspend fun search(title: String): NovelSearchResult? = withContext(Dispatchers.IO) {
         val query = title.trim()
@@ -76,7 +91,7 @@ class SiliconFlowNovelSearchService(
             val body = JSONObject().apply {
                 put("model", model)
                 put("messages", JSONArray().apply {
-                    put(JSONObject().put("role", "system").put("content", systemPrompt))
+                    put(JSONObject().put("role", "system").put("content", buildSystemPrompt()))
                     put(JSONObject().put("role", "user").put("content", userContent))
                 })
                 put("response_format", JSONObject().put("type", "json_object"))

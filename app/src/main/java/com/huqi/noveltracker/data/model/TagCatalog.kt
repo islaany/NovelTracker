@@ -117,6 +117,34 @@ object TagCatalog {
         // 频道
         Tag("男频", "#37474F"),
         Tag("女频", "#AD1457"),
+        // BL / 耽美细分
+        Tag("BL", "#5C6BC0"),
+        Tag("耽美", "#7986CB"),
+        Tag("ABO", "#8E24AA"),
+        Tag("哨兵向导", "#5C4DFF"),
+        Tag("年下", "#26C6DA"),
+        Tag("年上", "#4DD0E1"),
+        Tag("强强", "#EF5350"),
+        Tag("主受", "#F06292"),
+        Tag("主攻", "#EC407A"),
+        Tag("破镜重圆", "#FF7043"),
+        Tag("追妻火葬场", "#D81B60"),
+        Tag("双洁", "#4DB6AC"),
+        Tag("非双洁", "#78909C"),
+        Tag("生子", "#F48FB1"),
+        Tag("强制爱", "#D81B60"),
+        Tag("替身", "#9575CD"),
+        Tag("暗恋", "#9575CD"),
+        Tag("青梅竹马", "#4DB6AC"),
+        Tag("先婚后爱", "#EC407A"),
+        Tag("契约恋爱", "#BA68C8"),
+        Tag("掉马", "#FFB300"),
+        Tag("救赎", "#26A69A"),
+        Tag("养成", "#9CCC65"),
+        Tag("甜虐", "#F06292"),
+        Tag("双向奔赴", "#F48FB1"),
+        Tag("误会", "#78909C"),
+        Tag("团宠", "#FFCA28"),
         // 经典流派
         Tag("升级流", "#66BB6A"),
         Tag("蒸汽朋克", "#5C8A5C"),
@@ -127,6 +155,9 @@ object TagCatalog {
 
     /** Human-readable genre list for the AI prompt (e.g. "玄幻、奇幻、仙侠…"). */
     val promptList: String = DEFAULT_GENRES.joinToString("、") { it.name }
+
+    /** True when [name] ships with the app; false for user-created / AI-invented words. */
+    fun isBuiltIn(name: String): Boolean = name in nameSet
 
     /**
      * Common AI phrasings -> our catalog genre. Covers suffixes like "文/流/类"

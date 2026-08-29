@@ -13,6 +13,12 @@ interface NovelRepository {
     fun observeNovel(id: Long): Flow<Novel?>
     fun observeTags(): Flow<List<Tag>>
 
+    /** One-shot snapshot of every novel (duplicate check, backup export). */
+    suspend fun getAll(): List<Novel>
+
+    /** One-shot snapshot of the whole tag catalog. */
+    suspend fun getAllTags(): List<Tag>
+
     suspend fun upsert(novel: Novel): Long
     suspend fun delete(novel: Novel)
 

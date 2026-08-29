@@ -25,4 +25,10 @@ data class NovelSearchResult(
  */
 interface NovelSearchService {
     suspend fun search(title: String): NovelSearchResult?
+
+    /**
+     * Feed the user's own vocabulary (tags they created or kept) back to the model.
+     * Default no-op so mock/simple implementations don't have to care.
+     */
+    fun setUserVocabulary(words: List<String>) {}
 }

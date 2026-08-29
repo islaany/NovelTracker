@@ -13,6 +13,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Backup
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Menu
@@ -102,6 +103,12 @@ fun HomeScreen(
                     icon = { Icon(Icons.Default.Sell, contentDescription = null) },
                     selected = false,
                     onClick = { scope.launch { drawerState.close() }; navController.navigate(Screen.Tags.route) }
+                )
+                NavigationDrawerItem(
+                    label = { Text("备份与恢复") },
+                    icon = { Icon(Icons.Default.Backup, contentDescription = null) },
+                    selected = false,
+                    onClick = { scope.launch { drawerState.close() }; navController.navigate(Screen.Backup.route) }
                 )
             }
         }

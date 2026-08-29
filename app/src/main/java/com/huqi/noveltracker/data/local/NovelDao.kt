@@ -13,6 +13,10 @@ interface NovelDao {
     @Query("SELECT * FROM novels ORDER BY addedAt DESC")
     fun observeAll(): Flow<List<NovelEntity>>
 
+    /** One-shot read — used by duplicate detection and backup export. */
+    @Query("SELECT * FROM novels ORDER BY addedAt DESC")
+    suspend fun getAll(): List<NovelEntity>
+
     @Query("SELECT * FROM novels WHERE id = :id")
     fun observeById(id: Long): Flow<NovelEntity?>
 
