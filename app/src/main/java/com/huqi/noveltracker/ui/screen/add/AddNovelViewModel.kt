@@ -219,7 +219,9 @@ class AddNovelViewModel(application: Application) : AndroidViewModel(application
     fun addCustomSubTag(raw: String) {
         val name = raw.trim()
         if (name.isBlank()) return
-        runCatching { repo.upsertTag(Tag(name = name, color = tagColor(name))) }
+        // upsertTag is suspend — fire it on the viewmodel scope; the sub-tag set is
+        // updated synchronously so the chip appears immediately.
+        viewModelScope.launch { runCatching { repo.upsertTag(Tag(name = name, color = tagColor(name))) } }
         val sub = _subTags.value.toMutableSet()
         sub.add(name)
         _subTags.value = sub
