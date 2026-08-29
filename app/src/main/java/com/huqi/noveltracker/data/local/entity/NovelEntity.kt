@@ -16,7 +16,8 @@ data class NovelEntity(
     val highlights: String?,
     val wantReRead: Boolean?,
     val wantRecommend: Boolean?,
-    val tags: List<String>,
+    val mainTags: List<String>,
+    val subTags: List<String>,
     val source: String?,
     val addedAt: Long
 )
@@ -31,7 +32,8 @@ fun NovelEntity.toModel(): Novel = Novel(
     highlights = highlights,
     wantReRead = wantReRead,
     wantRecommend = wantRecommend,
-    tags = tags,
+    mainTags = mainTags,
+    subTags = subTags,
     source = source,
     addedAt = addedAt
 )
@@ -46,7 +48,8 @@ fun Novel.toEntity(): NovelEntity = NovelEntity(
     highlights = highlights,
     wantReRead = wantReRead,
     wantRecommend = wantRecommend,
-    tags = tags,
+    mainTags = mainTags,
+    subTags = subTags,
     source = source,
     addedAt = addedAt
 )

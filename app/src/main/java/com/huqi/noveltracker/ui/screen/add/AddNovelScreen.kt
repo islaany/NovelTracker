@@ -254,10 +254,13 @@ private fun ReviewStep(viewModel: AddNovelViewModel, onSave: () -> Unit) {
     val d by viewModel.draft.collectAsState()
     val ocrText by viewModel.ocrText.collectAsState()
     val catalogTags by viewModel.tags.collectAsState()
-    val selectedTags by viewModel.selectedTags.collectAsState()
+    val mainTags by viewModel.mainTags.collectAsState()
+    val subTags by viewModel.subTags.collectAsState()
     val wantReRead by viewModel.wantReRead.collectAsState()
     val wantRecommend by viewModel.wantRecommend.collectAsState()
-    val displayTags = (catalogTags.map { it.name }.toSet() + selectedTags).toList()
+    val colorMap = catalogTags.associate { it.name to it.color }
+    val displayTags = (catalogTags.map { it.name }.toSet() + mainTags + subTags).toList()
+    val mainFull = mainTags.size >= 2
 
     Column(
         modifier = Modifier.verticalScroll(rememberScrollState()),
@@ -315,16 +318,46 @@ private fun ReviewStep(viewModel: AddNovelViewModel, onSave: () -> Unit) {
         LabeledField("高光内容", d.highlights, multiline = true) { new -> viewModel.updateDraft { it.copy(highlights = new) } }
 
         Text(
-            "标签（AI 已自动勾选推荐，可自由增删）",
+            "主标签（最多 2 个，决定归类与排序优先）",
             style = MaterialTheme.typography.labelMedium
         )
+        if (mainFull) {
+            Text(
+                "· 主标签已满（最多 2 个），先取消一个可再选",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+            )
+        }
         FlowRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             displayTags.forEach { name ->
-                val selected = name in selectedTags
-                TagChip(name = name, selected = selected, onClick = { viewModel.toggleTag(name) })
+                val isMain = name in mainTags
+                val disabled = !isMain && mainFull
+                TagChip(
+                    name = name,
+                    colorHex = colorMap[name],
+                    filled = isMain,
+                    onClick = if (disabled) null else ({ viewModel.toggleMain(name) })
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(6.dp))
+        Text("副标签（可多个，细化分类）", style = MaterialTheme.typography.labelMedium)
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            displayTags.filter { it !in mainTags }.forEach { name ->
+                val isSub = name in subTags
+                TagChip(
+                    name = name,
+                    colorHex = colorMap[name],
+                    selected = isSub,
+                    onClick = { viewModel.toggleSub(name) }
+                )
             }
         }
 

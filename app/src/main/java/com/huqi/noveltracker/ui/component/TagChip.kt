@@ -19,36 +19,50 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 
 /**
- * Small tag pill. Pass [selected] + [onClick] to make it a toggle (used in filter row).
+ * Small tag pill.
+ *
+ * States:
+ *  - [filled]  = a MAIN tag: solid tinted background + colored border (prominent).
+ *  - [selected] = a SUB tag: light tint, no border.
+ *  - default   = an unselected chip (used in filter rows / sub-tag pool).
+ * Pass [onClick] to make it tappable (filter chips, tag picker).
  */
 @Composable
 fun TagChip(
     name: String,
     colorHex: String? = null,
     selected: Boolean = false,
+    filled: Boolean = false,
     onClick: (() -> Unit)? = null
 ) {
-    val dotColor = runCatching { Color(android.graphics.Color.parseColor(colorHex)) }
-        .getOrDefault(MaterialTheme.colorScheme.primary)
+    val color = runCatching { colorHex?.let { Color(android.graphics.Color.parseColor(it)) } }
+        .getOrDefault(null)
 
     val shape = RoundedCornerShape(50)
-    val modifier = Modifier
-        .clip(shape)
-        .then(
-            if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier
-        )
-        .then(
-            if (selected) Modifier.border(1.5.dp, dotColor, shape)
-            else Modifier
-        )
-        .background(
-            if (selected) dotColor.copy(alpha = 0.12f)
-            else MaterialTheme.colorScheme.surfaceVariant,
-            shape
-        )
-        .padding(horizontal = 12.dp, vertical = 6.dp)
+    val bg = when {
+        filled && color != null -> color.copy(alpha = 0.16f)
+        selected && color != null -> color.copy(alpha = 0.10f)
+        else -> MaterialTheme.colorScheme.surfaceVariant
+    }
+    val border = when {
+        filled && color != null -> Modifier.border(1.5.dp, color, shape)
+        selected && color != null -> Modifier.border(1.dp, color.copy(alpha = 0.5f), shape)
+        else -> Modifier
+    }
+    val dotColor = color ?: MaterialTheme.colorScheme.primary
+    val textColor = when {
+        filled && color != null -> color.copy(alpha = 0.92f)
+        else -> MaterialTheme.colorScheme.onSurface
+    }
 
-    Row(modifier = modifier) {
+    Row(
+        modifier = Modifier
+            .clip(shape)
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            .then(border)
+            .background(bg, shape)
+            .padding(horizontal = 12.dp, vertical = 6.dp)
+    ) {
         Spacer(
             modifier = Modifier
                 .size(8.dp)
@@ -59,7 +73,7 @@ fun TagChip(
         Text(
             text = name,
             style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurface
+            color = textColor
         )
     }
 }

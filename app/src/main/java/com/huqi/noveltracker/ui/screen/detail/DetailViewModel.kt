@@ -7,6 +7,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.huqi.noveltracker.appContainer
 import com.huqi.noveltracker.data.model.Novel
+import com.huqi.noveltracker.data.model.Tag
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -22,6 +23,9 @@ class DetailViewModel(
 
     val novel: StateFlow<Novel?> = repo.observeNovel(novelId)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    val tags: StateFlow<List<Tag>> =
+        repo.observeTags().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     fun toggleReRead() = viewModelScope.launch {
         novel.value?.let {

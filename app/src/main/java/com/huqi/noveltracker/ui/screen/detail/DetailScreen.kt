@@ -93,6 +93,8 @@ fun DetailScreen(
 
 @Composable
 private fun DetailContent(novel: Novel, viewModel: DetailViewModel, modifier: Modifier = Modifier) {
+    val tags by viewModel.tags.collectAsState()
+    val colorMap = tags.associate { it.name to it.color }
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -125,8 +127,28 @@ private fun DetailContent(novel: Novel, viewModel: DetailViewModel, modifier: Mo
                     Text("作者：${novel.author}", style = MaterialTheme.typography.bodyLarge)
                 }
                 Spacer(modifier = Modifier.height(8.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    novel.tags.forEach { TagChip(name = it) }
+                if (novel.mainTags.isNotEmpty()) {
+                    Text(
+                        "主标签",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        novel.mainTags.forEach { TagChip(name = it, colorHex = colorMap[it], filled = true) }
+                    }
+                }
+                if (novel.subTags.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        "副标签",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        novel.subTags.forEach { TagChip(name = it, colorHex = colorMap[it], selected = true) }
+                    }
                 }
             }
         }

@@ -62,7 +62,8 @@ class RoomNovelRepository(
                 highlights = "· 序列途径与魔药体系\n· 塔罗会布局\n· 对抗外神的最终决战",
                 wantReRead = true,
                 wantRecommend = true,
-                tags = listOf("克苏鲁", "蒸汽朋克", "西幻"),
+                mainTags = listOf("克苏鲁", "西幻"),
+                subTags = listOf("蒸汽朋克"),
                 source = "示例"
             ),
             Novel(
@@ -73,7 +74,8 @@ class RoomNovelRepository(
                 highlights = "· 江南诗会惊四座\n· 牛栏街刺杀\n· 京都风波及权争",
                 wantReRead = false,
                 wantRecommend = true,
-                tags = listOf("权谋", "穿越", "历史"),
+                mainTags = listOf("穿越", "历史"),
+                subTags = listOf("权谋"),
                 source = "示例"
             ),
             Novel(
@@ -84,7 +86,8 @@ class RoomNovelRepository(
                 highlights = "· 退婚流经典开局\n· 异火收集\n· 炎帝崛起",
                 wantReRead = true,
                 wantRecommend = false,
-                tags = listOf("玄幻", "升级流"),
+                mainTags = listOf("玄幻", "升级流"),
+                subTags = emptyList(),
                 source = "示例"
             ),
             Novel(
@@ -95,7 +98,8 @@ class RoomNovelRepository(
                 highlights = "· 兴欣战队组建\n· 全明星赛\n· 第十赛季夺冠",
                 wantReRead = false,
                 wantRecommend = false,
-                tags = listOf("电竞", "热血", "群像"),
+                mainTags = listOf("电竞", "热血"),
+                subTags = listOf("群像"),
                 source = "示例"
             )
         )

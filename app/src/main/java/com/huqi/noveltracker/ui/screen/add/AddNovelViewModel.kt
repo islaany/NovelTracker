@@ -56,8 +56,11 @@ class AddNovelViewModel(application: Application) : AndroidViewModel(application
     private val _draft = MutableStateFlow(AddDraft())
     val draft: StateFlow<AddDraft> = _draft.asStateFlow()
 
-    private val _selectedTags = MutableStateFlow<Set<String>>(emptySet())
-    val selectedTags: StateFlow<Set<String>> = _selectedTags.asStateFlow()
+    private val _mainTags = MutableStateFlow<Set<String>>(emptySet())
+    val mainTags: StateFlow<Set<String>> = _mainTags.asStateFlow()
+
+    private val _subTags = MutableStateFlow<Set<String>>(emptySet())
+    val subTags: StateFlow<Set<String>> = _subTags.asStateFlow()
 
     private val _wantReRead = MutableStateFlow(false)
     val wantReRead: StateFlow<Boolean> = _wantReRead.asStateFlow()
@@ -122,9 +125,12 @@ class AddNovelViewModel(application: Application) : AndroidViewModel(application
                 )
                 // Normalize AI tags onto the curated genre vocabulary so the
                 // selected set always matches what's filterable in the catalog.
-                _selectedTags.value = (result?.tags ?: emptyList<String>())
+                // AI-suggested tags land in sub-tags; the user promotes up to 2
+                // to main tags in the review screen.
+                _subTags.value = (result?.tags ?: emptyList<String>())
                     .map { TagCatalog.normalize(it) }
                     .toSet()
+                _mainTags.value = emptySet()
 
                 // 3) finished — show "导入完成" briefly, then advance to the editable review screen
                 _importPhase.value = ImportPhase.DONE
@@ -163,9 +169,12 @@ class AddNovelViewModel(application: Application) : AndroidViewModel(application
                 )
                 // Normalize AI tags onto the curated genre vocabulary so the
                 // selected set always matches what's filterable in the catalog.
-                _selectedTags.value = (result?.tags ?: emptyList<String>())
+                // AI-suggested tags land in sub-tags; the user promotes up to 2
+                // to main tags in the review screen.
+                _subTags.value = (result?.tags ?: emptyList<String>())
                     .map { TagCatalog.normalize(it) }
                     .toSet()
+                _mainTags.value = emptySet()
                 _importPhase.value = ImportPhase.DONE
                 delay(900)
                 _step.value = AddStep.REVIEW
@@ -180,10 +189,26 @@ class AddNovelViewModel(application: Application) : AndroidViewModel(application
         _draft.value = block(_draft.value)
     }
 
-    fun toggleTag(name: String) {
-        val set = _selectedTags.value.toMutableSet()
-        if (set.contains(name)) set.remove(name) else set.add(name)
-        _selectedTags.value = set
+    /** Toggle a main tag. Enforces the max-2 rule and moves it out of sub-tags. */
+    fun toggleMain(name: String) {
+        val main = _mainTags.value.toMutableSet()
+        if (main.contains(name)) {
+            main.remove(name)
+        } else {
+            if (main.size >= 2) return // 主标签最多 2 个
+            main.add(name)
+            val sub = _subTags.value.toMutableSet()
+            sub.remove(name)
+            _subTags.value = sub
+        }
+        _mainTags.value = main
+    }
+
+    /** Toggle a sub tag (unlimited). */
+    fun toggleSub(name: String) {
+        val sub = _subTags.value.toMutableSet()
+        if (sub.contains(name)) sub.remove(name) else sub.add(name)
+        _subTags.value = sub
     }
 
     fun toggleWantReRead() { _wantReRead.value = !_wantReRead.value }
@@ -193,9 +218,10 @@ class AddNovelViewModel(application: Application) : AndroidViewModel(application
     suspend fun save(): Long? {
         val d = _draft.value
         val finalTitle = d.title.ifBlank { _ocrText.value.lines().firstOrNull { it.isNotBlank() } ?: "" }
-        val tags = _selectedTags.value.filter { it.isNotBlank() }
+        val main = _mainTags.value.filter { it.isNotBlank() }
+        val sub = _subTags.value.filter { it.isNotBlank() }
         // Make sure selected tags exist in the catalog so they become filterable on Home.
-        tags.forEach { name ->
+        (main + sub).forEach { name ->
             runCatching { repo.upsertTag(Tag(name = name, color = tagColor(name))) }
         }
         val novel = Novel(
@@ -207,7 +233,8 @@ class AddNovelViewModel(application: Application) : AndroidViewModel(application
             highlights = d.highlights.ifBlank { null },
             wantReRead = _wantReRead.value,
             wantRecommend = _wantRecommend.value,
-            tags = tags,
+            mainTags = main,
+            subTags = sub,
             source = d.source.ifBlank { null }
         )
         return runCatching { repo.upsert(novel) }.getOrNull()?.takeIf { id -> id > 0L }

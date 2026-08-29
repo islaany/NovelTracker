@@ -81,7 +81,8 @@ fun NovelCard(
                 }
                 Spacer(modifier = Modifier.height(6.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    novel.tags.take(3).forEach { TagChip(name = it) }
+                    novel.mainTags.take(2).forEach { TagChip(name = it, filled = true) }
+                    novel.subTags.take(2).forEach { TagChip(name = it, selected = true) }
                 }
                 Spacer(modifier = Modifier.height(6.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
