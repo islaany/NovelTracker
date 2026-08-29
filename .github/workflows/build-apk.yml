@@ -62,6 +62,8 @@ jobs:
           FILE=$(find app/build/outputs/apk/debug -name 'app-debug.apk' | head -1)
           echo "APK=$FILE size=$(stat -c%s "$FILE")"
           echo "file=$FILE" >> "$GITHUB_OUTPUT"
+          VERSION_NAME=$(grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts | head -1)
+          echo "version_name=$VERSION_NAME" >> "$GITHUB_OUTPUT"
 
       - name: Commit valid wrapper to repo (skip ci)
         continue-on-error: true
@@ -81,12 +83,17 @@ jobs:
         run: |
           set -euo pipefail
           FILE="${{ steps.verify.outputs.file }}"
-          echo "Publishing $FILE"
+          SHORT_SHA="${GITHUB_SHA:0:8}"
+          VERSION_NAME="${{ steps.verify.outputs.version_name }}"
+          # Unique APK name per build so the download URL never collides / gets cached.
+          APK_NAME="NovelTracker-${VERSION_NAME}-b${{ github.run_number }}-${SHORT_SHA}.apk"
+          cp "$FILE" "$APK_NAME"
+          echo "Publishing $APK_NAME (built from $FILE)"
           gh release delete debug-apk -y --cleanup-tag 2>/dev/null || true
-          gh release create debug-apk "$FILE" \
+          gh release create debug-apk "$APK_NAME" \
             --title "Debug APK (latest)" \
             --prerelease \
-            --notes "Auto-built debug APK from ${{ github.sha }}"
+            --notes "Auto-built debug APK #${{ github.run_number }} from ${{ github.sha }}"
 
       - name: Diagnose on failure
         if: failure()
