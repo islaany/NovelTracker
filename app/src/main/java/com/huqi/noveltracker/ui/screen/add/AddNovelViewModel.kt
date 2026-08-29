@@ -7,6 +7,7 @@ import android.graphics.BitmapFactory
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.huqi.noveltracker.appContainer
 import com.huqi.noveltracker.data.model.Novel
 import com.huqi.noveltracker.data.model.Tag
 import kotlinx.coroutines.delay

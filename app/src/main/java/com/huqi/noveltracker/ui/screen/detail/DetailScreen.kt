@@ -76,12 +76,17 @@ fun DetailScreen(
             )
         }
     ) { padding ->
-        if (novel == null) {
-            Box(modifier = Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-                Text("记录不存在或已删除")
-            }
-        } else {
-            DetailContent(novel = novel, viewModel = viewModel, modifier = Modifier.padding(padding))
+        novel?.let { current ->
+            DetailContent(
+                novel = current,
+                viewModel = viewModel,
+                modifier = Modifier.padding(padding)
+            )
+        } ?: Box(
+            modifier = Modifier.fillMaxSize().padding(padding),
+            contentAlignment = Alignment.Center
+        ) {
+            Text("记录不存在或已删除")
         }
     }
 }
