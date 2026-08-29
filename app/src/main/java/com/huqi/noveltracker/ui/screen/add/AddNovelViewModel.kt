@@ -7,9 +7,9 @@ import android.graphics.BitmapFactory
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.huqi.noveltracker.appContainer
 import com.huqi.noveltracker.data.model.Novel
 import com.huqi.noveltracker.data.model.Tag
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -17,7 +17,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
-enum class AddStep { PICK, OCR, NAME, REVIEW }
+enum class AddStep { PICK, IMPORTING, REVIEW }
+enum class ImportPhase { OCR, SEARCH, DONE }
 
 data class AddDraft(
     val title: String = "",
@@ -44,17 +45,11 @@ class AddNovelViewModel(application: Application) : AndroidViewModel(application
     private val _imageUri = MutableStateFlow<Uri?>(null)
     val imageUri: StateFlow<Uri?> = _imageUri.asStateFlow()
 
+    private val _importPhase = MutableStateFlow(ImportPhase.OCR)
+    val importPhase: StateFlow<ImportPhase> = _importPhase.asStateFlow()
+
     private val _ocrText = MutableStateFlow("")
     val ocrText: StateFlow<String> = _ocrText.asStateFlow()
-
-    private val _isOcrRunning = MutableStateFlow(false)
-    val isOcrRunning: StateFlow<Boolean> = _isOcrRunning.asStateFlow()
-
-    private val _title = MutableStateFlow("")
-    val title: StateFlow<String> = _title.asStateFlow()
-
-    private val _isSearching = MutableStateFlow(false)
-    val isSearching: StateFlow<Boolean> = _isSearching.asStateFlow()
 
     private val _draft = MutableStateFlow(AddDraft())
     val draft: StateFlow<AddDraft> = _draft.asStateFlow()
@@ -72,45 +67,43 @@ class AddNovelViewModel(application: Application) : AndroidViewModel(application
 
     fun onImagePicked(uri: Uri) {
         _imageUri.value = uri
-        _step.value = AddStep.OCR
-        runOcr(uri)
+        _step.value = AddStep.IMPORTING
+        runImport(uri)
     }
 
-    private fun runOcr(uri: Uri) {
+    /** Re-run the whole OCR + AI pipeline on the same screenshot (used from the review screen). */
+    fun reImport() {
+        _imageUri.value?.let { onImagePicked(it) }
+    }
+
+    private fun runImport(uri: Uri) {
         viewModelScope.launch {
-            _isOcrRunning.value = true
+            // 1) OCR
+            _importPhase.value = ImportPhase.OCR
             val bitmap = uri.toBitmap(getApplication())
             val text = bitmap?.let { runCatching { ocrEngine.recognize(it) }.getOrDefault("") } ?: ""
             _ocrText.value = text
-            _title.value = text.lines().firstOrNull { it.isNotBlank() } ?: ""
-            _isOcrRunning.value = false
-            _step.value = AddStep.NAME
-        }
-    }
 
-    fun onTitleChange(value: String) { _title.value = value }
-    fun onOcrTextChange(value: String) { _ocrText.value = value }
+            // 2) AI lookup (uses the first meaningful OCR line as the query)
+            _importPhase.value = ImportPhase.SEARCH
+            val query = text.lines().firstOrNull { it.isNotBlank() } ?: text.trim()
+            val result = if (query.isNotBlank())
+                runCatching { searchService.search(query) }.getOrNull() else null
 
-    fun onSearch() {
-        // Prefer the (possibly corrected) OCR text so the AI can extract the real title;
-        // fall back to the manual title field when OCR produced nothing.
-        val q = _ocrText.value.trim().ifBlank { _title.value.trim() }
-        if (q.isBlank()) return
-        viewModelScope.launch {
-            _isSearching.value = true
-            val result = runCatching { searchService.search(q) }.getOrNull()
-            _isSearching.value = false
-            val r = result
             _draft.value = AddDraft(
-                title = r?.title ?: q,
-                author = r?.author ?: "",
-                coverUrl = r?.coverUrl ?: "",
-                synopsis = r?.synopsis ?: "",
-                protagonist = r?.protagonist ?: "",
-                highlights = r?.highlights ?: "",
-                source = r?.source ?: ""
+                title = result?.title ?: query,
+                author = result?.author ?: "",
+                coverUrl = result?.coverUrl ?: "",
+                synopsis = result?.synopsis ?: "",
+                protagonist = result?.protagonist ?: "",
+                highlights = result?.highlights ?: "",
+                source = result?.source ?: ""
             )
-            _selectedTags.value = (r?.tags ?: emptyList<String>()).toSet()
+            _selectedTags.value = (result?.tags ?: emptyList<String>()).toSet()
+
+            // 3) finished — show "导入完成" briefly, then advance to the editable review screen
+            _importPhase.value = ImportPhase.DONE
+            delay(900)
             _step.value = AddStep.REVIEW
         }
     }
@@ -131,13 +124,14 @@ class AddNovelViewModel(application: Application) : AndroidViewModel(application
     /** Persists the record. Returns the new id, or null on failure. */
     suspend fun save(): Long? {
         val d = _draft.value
+        val finalTitle = d.title.ifBlank { _ocrText.value.lines().firstOrNull { it.isNotBlank() } ?: "" }
         val tags = _selectedTags.value.filter { it.isNotBlank() }
         // Make sure selected tags exist in the catalog so they become filterable on Home.
         tags.forEach { name ->
             runCatching { repo.upsertTag(Tag(name = name, color = tagColor(name))) }
         }
         val novel = Novel(
-            title = d.title.ifBlank { _title.value },
+            title = finalTitle,
             author = d.author.ifBlank { null },
             coverUrl = d.coverUrl.ifBlank { null },
             synopsis = d.synopsis.ifBlank { null },

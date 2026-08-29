@@ -14,15 +14,17 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -46,7 +48,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
-import coil.compose.AsyncImage
 import com.huqi.noveltracker.ui.component.TagChip
 import com.huqi.noveltracker.ui.navigation.Screen
 import kotlinx.coroutines.launch
@@ -57,6 +58,8 @@ fun AddNovelScreen(
     navController: NavHostController,
     viewModel: AddNovelViewModel = viewModel()
 ) {
+    val step by viewModel.step.collectAsState()
+    val importPhase by viewModel.importPhase.collectAsState()
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) viewModel.onImagePicked(uri)
     }
@@ -80,18 +83,12 @@ fun AddNovelScreen(
                 .padding(padding)
                 .padding(horizontal = 16.dp)
         ) {
-            StepHeader(step = viewModel.step.value)
+            StepHeader(step = step)
             Spacer(modifier = Modifier.height(12.dp))
 
-            when (viewModel.step.value) {
+            when (step) {
                 AddStep.PICK -> PickStep { launcher.launch("image/*") }
-                AddStep.OCR -> OcrStep()
-                AddStep.NAME -> NameStep(
-                    viewModel = viewModel,
-                    onRerun = {
-                        viewModel.imageUri.value?.let { viewModel.onImagePicked(it) }
-                    }
-                )
+                AddStep.IMPORTING -> ImportingStep(phase = importPhase)
                 AddStep.REVIEW -> ReviewStep(
                     viewModel = viewModel,
                     onSave = {
@@ -112,12 +109,8 @@ fun AddNovelScreen(
 
 @Composable
 private fun StepHeader(step: AddStep) {
-    val labels = listOf("选择截图", "书名识别", "生成记录")
-    val current = when (step) {
-        AddStep.PICK -> 0
-        AddStep.OCR, AddStep.NAME -> 1
-        AddStep.REVIEW -> 2
-    }
+    val labels = listOf("选择截图", "完善记录")
+    val current = if (step == AddStep.REVIEW) 1 else 0
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically
@@ -168,116 +161,110 @@ private fun StepHeader(step: AddStep) {
 @Composable
 private fun PickStep(onPick: () -> Unit) {
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Button(onClick = onPick) { Text("从相册选择截图") }
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Button(
+                onClick = onPick,
+                modifier = Modifier.fillMaxWidth(0.8f)
+            ) {
+                Text("导入小说截图")
+            }
+            Spacer(modifier = Modifier.height(10.dp))
+            Text(
+                text = "选择一张阅读软件里的截图，自动识别书名并生成记录",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                textAlign = TextAlign.Center
+            )
+        }
     }
 }
 
 @Composable
-private fun OcrStep() {
+private fun ImportingStep(phase: ImportPhase) {
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             CircularProgressIndicator()
-            Spacer(modifier = Modifier.height(12.dp))
-            Text("正在识别文字…", style = MaterialTheme.typography.bodyLarge)
-        }
-    }
-}
-
-@Composable
-private fun NameStep(viewModel: AddNovelViewModel, onRerun: () -> Unit) {
-    val ocrText by viewModel.ocrText.collectAsState()
-    val title by viewModel.title.collectAsState()
-    val uri = viewModel.imageUri.value
-
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        if (uri != null) {
-            AsyncImage(
-                model = uri,
-                contentDescription = null,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(180.dp)
-                    .clip(RoundedCornerShape(12.dp))
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(
+                text = when (phase) {
+                    ImportPhase.OCR -> "正在导入…\n识别截图文字中"
+                    ImportPhase.SEARCH -> "正在导入…\n生成书籍资料中"
+                    ImportPhase.DONE -> "✅ 导入完成"
+                },
+                style = MaterialTheme.typography.bodyLarge,
+                textAlign = TextAlign.Center
             )
-        }
-        Text("OCR 识别出的文字（可直接修正）：", style = MaterialTheme.typography.labelMedium)
-        OutlinedTextField(
-            value = ocrText,
-            onValueChange = viewModel::onOcrTextChange,
-            label = { Text("截图文字") },
-            placeholder = { Text("（未识别到文字，可在此粘贴或手动输入书名）") },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(120.dp),
-            singleLine = false
-        )
-        OutlinedTextField(
-            value = title,
-            onValueChange = viewModel::onTitleChange,
-            label = { Text("提取出的书名（可改）") },
-            modifier = Modifier.fillMaxWidth()
-        )
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            OutlinedButton(onClick = onRerun, modifier = Modifier.weight(1f)) { Text("重新识别") }
-            Button(
-                onClick = viewModel::onSearch,
-                modifier = Modifier.weight(1f),
-                enabled = ocrText.isNotBlank() || title.isNotBlank()
-            ) {
-                Icon(Icons.Default.Search, contentDescription = null)
-                Text(" AI 识别书名并生成记录")
-            }
         }
     }
 }
 
 @Composable
 private fun ReviewStep(viewModel: AddNovelViewModel, onSave: () -> Unit) {
-    val d = viewModel.draft.value
-    val catalog = viewModel.tags.value.map { it.name }.toSet()
-    val displayTags = (catalog + viewModel.selectedTags.value).toList()
+    val d by viewModel.draft.collectAsState()
+    val catalog = viewModel.tags.collectAsState().value.map { it.name }.toSet()
+    val selectedTags by viewModel.selectedTags.collectAsState()
+    val wantReRead by viewModel.wantReRead.collectAsState()
+    val wantRecommend by viewModel.wantRecommend.collectAsState()
+    val displayTags = (catalog + selectedTags).toList()
 
     Column(
         modifier = Modifier.verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        if (viewModel.isSearching.value) {
-            Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
+        // "导入完成" 反馈横幅
+        Card(
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.primaryContainer
+            ),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier.padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    Icons.Default.Check,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    "导入完成，可修改后保存到书架",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                )
             }
         }
 
-        LabeledField("书名", d.title) { newText ->
-            viewModel.updateDraft { it.copy(title = newText) }
-        }
-        LabeledField("作者", d.author) { newText ->
-            viewModel.updateDraft { it.copy(author = newText) }
-        }
-        LabeledField("简介", d.synopsis, multiline = true) { newText ->
-            viewModel.updateDraft { it.copy(synopsis = newText) }
-        }
-        LabeledField("主角", d.protagonist) { newText ->
-            viewModel.updateDraft { it.copy(protagonist = newText) }
-        }
-        LabeledField("高光内容", d.highlights, multiline = true) { newText ->
-            viewModel.updateDraft { it.copy(highlights = newText) }
-        }
+        LabeledField("书名", d.title) { new -> viewModel.updateDraft { it.copy(title = new) } }
+        LabeledField("作者", d.author) { new -> viewModel.updateDraft { it.copy(author = new) } }
+        LabeledField("简介", d.synopsis, multiline = true) { new -> viewModel.updateDraft { it.copy(synopsis = new) } }
+        LabeledField("主角", d.protagonist) { new -> viewModel.updateDraft { it.copy(protagonist = new) } }
+        LabeledField("高光内容", d.highlights, multiline = true) { new -> viewModel.updateDraft { it.copy(highlights = new) } }
 
         Text("标签", style = MaterialTheme.typography.labelMedium)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             displayTags.forEach { name ->
-                val selected = name in viewModel.selectedTags.value
+                val selected = name in selectedTags
                 TagChip(name = name, selected = selected, onClick = { viewModel.toggleTag(name) })
             }
         }
 
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("想再看一遍", modifier = Modifier.weight(1f))
-            Switch(checked = viewModel.wantReRead.value, onCheckedChange = { viewModel.toggleWantReRead() })
+            Switch(checked = wantReRead, onCheckedChange = { viewModel.toggleWantReRead() })
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("想推荐给别人", modifier = Modifier.weight(1f))
-            Switch(checked = viewModel.wantRecommend.value, onCheckedChange = { viewModel.toggleWantRecommend() })
+            Switch(checked = wantRecommend, onCheckedChange = { viewModel.toggleWantRecommend() })
+        }
+
+        OutlinedButton(
+            onClick = viewModel::reImport,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Icon(Icons.Default.Refresh, contentDescription = null)
+            Text(" 重新导入这张截图")
         }
 
         Button(onClick = onSave, modifier = Modifier.fillMaxWidth()) {

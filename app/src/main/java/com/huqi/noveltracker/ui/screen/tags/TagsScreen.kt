@@ -29,6 +29,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -56,7 +57,7 @@ fun TagsScreen(
 ) {
     var name by remember { mutableStateOf("") }
     var selectedColor by remember { mutableStateOf(PALETTE[0]) }
-    val tags = viewModel.tags.value
+    val tags by viewModel.tags.collectAsState()
 
     Scaffold(
         topBar = {

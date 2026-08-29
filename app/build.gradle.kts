@@ -25,7 +25,22 @@ android {
         buildConfigField("String", "SILICONFLOW_BASE_URL", "\"https://api.siliconflow.cn/v1/\"")
     }
 
+    signingConfigs {
+        // Fixed debug keystore committed to the repo so every CI build shares the
+        // same signature -> the app can be updated by overwriting instead of
+        // uninstalling first. (Debug key only; not a release/secret key.)
+        create("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("debug")
+        }
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
