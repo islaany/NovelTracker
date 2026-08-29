@@ -46,12 +46,15 @@ class SiliconFlowNovelSearchService(
      * BL-specific words it would otherwise never produce) while the built-in list
      * still guarantees every tag stays filterable.
      */
-    var userVocabulary: List<String> = emptyList()
+    // Named 'personalVocabulary' (not 'userVocabulary') on purpose: a public var
+    // named userVocabulary would generate a setUserVocabulary() JVM setter that
+    // clashes with the interface override below.
+    private var personalVocabulary: List<String> = emptyList()
 
-    override fun setUserVocabulary(words: List<String>) { userVocabulary = words }
+    override fun setUserVocabulary(words: List<String>) { personalVocabulary = words }
 
     private fun buildSystemPrompt(): String {
-        val extra = userVocabulary.map { it.trim() }.filter { it.isNotBlank() }.distinct()
+        val extra = personalVocabulary.map { it.trim() }.filter { it.isNotBlank() }.distinct()
         val vocab = if (extra.isEmpty()) TagCatalog.promptList
         else TagCatalog.promptList + "、" + extra.joinToString("、")
         return """
