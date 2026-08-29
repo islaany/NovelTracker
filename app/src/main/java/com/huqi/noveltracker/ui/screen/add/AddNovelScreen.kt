@@ -35,6 +35,8 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -183,8 +185,8 @@ private fun OcrStep() {
 
 @Composable
 private fun NameStep(viewModel: AddNovelViewModel, onRerun: () -> Unit) {
-    val ocrText = viewModel.ocrText.value
-    val title = viewModel.title.value
+    val ocrText by viewModel.ocrText.collectAsState()
+    val title by viewModel.title.collectAsState()
     val uri = viewModel.imageUri.value
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -198,21 +200,21 @@ private fun NameStep(viewModel: AddNovelViewModel, onRerun: () -> Unit) {
                     .clip(RoundedCornerShape(12.dp))
             )
         }
-        Text("OCR 识别出的原文（可核对）：", style = MaterialTheme.typography.labelMedium)
-        Text(
-            text = ocrText.ifBlank { "（未识别到文字，可手动填写书名）" },
-            style = MaterialTheme.typography.bodyLarge,
+        Text("OCR 识别出的文字（可直接修正）：", style = MaterialTheme.typography.labelMedium)
+        OutlinedTextField(
+            value = ocrText,
+            onValueChange = viewModel::onOcrTextChange,
+            label = { Text("截图文字") },
+            placeholder = { Text("（未识别到文字，可在此粘贴或手动输入书名）") },
             modifier = Modifier
                 .fillMaxWidth()
-                .height(120.dp)
-                .verticalScroll(rememberScrollState())
-                .clip(RoundedCornerShape(8.dp))
-                .padding(8.dp)
+                .height(120.dp),
+            singleLine = false
         )
         OutlinedTextField(
             value = title,
             onValueChange = viewModel::onTitleChange,
-            label = { Text("提取出的书名") },
+            label = { Text("提取出的书名（可改）") },
             modifier = Modifier.fillMaxWidth()
         )
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -220,10 +222,10 @@ private fun NameStep(viewModel: AddNovelViewModel, onRerun: () -> Unit) {
             Button(
                 onClick = viewModel::onSearch,
                 modifier = Modifier.weight(1f),
-                enabled = title.isNotBlank()
+                enabled = ocrText.isNotBlank() || title.isNotBlank()
             ) {
                 Icon(Icons.Default.Search, contentDescription = null)
-                Text(" 搜索并生成记录")
+                Text(" AI 识别书名并生成记录")
             }
         }
     }

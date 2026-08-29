@@ -18,6 +18,11 @@ android {
         vectorDrawables {
             useSupportLibrary = true
         }
+
+        // SiliconFlow API key for the AI novel-lookup (OCR text -> title/author/synopsis/...).
+        // Stored here (private repo) so the CI build can embed it; rotate if leaked.
+        buildConfigField("String", "SILICONFLOW_API_KEY", "\"sk-87c5a100bd0446ffb5b6e628e063d25f\"")
+        buildConfigField("String", "SILICONFLOW_BASE_URL", "\"https://api.siliconflow.cn/v1/\"")
     }
 
     buildTypes {
@@ -38,6 +43,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     composeOptions {

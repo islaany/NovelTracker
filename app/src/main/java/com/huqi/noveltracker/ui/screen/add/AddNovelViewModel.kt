@@ -89,9 +89,12 @@ class AddNovelViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun onTitleChange(value: String) { _title.value = value }
+    fun onOcrTextChange(value: String) { _ocrText.value = value }
 
     fun onSearch() {
-        val q = _title.value.trim()
+        // Prefer the (possibly corrected) OCR text so the AI can extract the real title;
+        // fall back to the manual title field when OCR produced nothing.
+        val q = _ocrText.value.trim().ifBlank { _title.value.trim() }
         if (q.isBlank()) return
         viewModelScope.launch {
             _isSearching.value = true
@@ -128,6 +131,11 @@ class AddNovelViewModel(application: Application) : AndroidViewModel(application
     /** Persists the record. Returns the new id, or null on failure. */
     suspend fun save(): Long? {
         val d = _draft.value
+        val tags = _selectedTags.value.filter { it.isNotBlank() }
+        // Make sure selected tags exist in the catalog so they become filterable on Home.
+        tags.forEach { name ->
+            runCatching { repo.upsertTag(Tag(name = name, color = tagColor(name))) }
+        }
         val novel = Novel(
             title = d.title.ifBlank { _title.value },
             author = d.author.ifBlank { null },
@@ -137,10 +145,20 @@ class AddNovelViewModel(application: Application) : AndroidViewModel(application
             highlights = d.highlights.ifBlank { null },
             wantReRead = _wantReRead.value,
             wantRecommend = _wantRecommend.value,
-            tags = _selectedTags.value.toList(),
+            tags = tags,
             source = d.source.ifBlank { null }
         )
         return runCatching { repo.upsert(novel) }.getOrNull()?.takeIf { id -> id > 0L }
+    }
+
+    /** Deterministic pleasant color for a tag name so the catalog chips look varied. */
+    private fun tagColor(name: String): String {
+        val palette = listOf(
+            "#7C4DFF", "#5C8A5C", "#4FC3F7", "#C99A3B", "#E57373",
+            "#BA68C8", "#FF8A65", "#A1887F", "#42A5F5", "#26A69A", "#EF5350"
+        )
+        val idx = name.sumOf { it.code } % palette.size
+        return palette[idx]
     }
 
     private fun Uri.toBitmap(context: Context): Bitmap? = runCatching {
