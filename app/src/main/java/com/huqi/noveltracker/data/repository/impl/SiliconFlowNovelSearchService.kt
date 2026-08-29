@@ -14,7 +14,7 @@ import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
 /**
- * Real novel lookup backed by the SiliconFlow LLM API (OpenAI-compatible
+ * Real novel lookup backed by an OpenAI-compatible LLM API (DeepSeek by default,
  * /v1/chat/completions).
  *
  * Flow: the caller passes the OCR text from a reading-app screenshot; the model
@@ -22,14 +22,14 @@ import java.util.concurrent.TimeUnit
  * concise synopsis, protagonist(s), highlights and category tags. This is what
  * makes "pick screenshot -> know what the book is about" actually work end-to-end.
  *
- * Falls back to a smaller free model if the primary one errors, and ultimately
- * returns at least the raw title so the record can always be saved.
+ * Falls back to the same provider's chat model if the primary call errors, and
+ * ultimately returns at least the raw title so the record can always be saved.
  */
 class SiliconFlowNovelSearchService(
     private val apiKey: String,
-    private val baseUrl: String = "https://api.siliconflow.cn/v1/",
-    private val primaryModel: String = "Qwen/Qwen2.5-72B-Instruct",
-    private val fallbackModel: String = "Qwen/Qwen2.5-7B-Instruct"
+    private val baseUrl: String = "https://api.deepseek.com/v1/",
+    private val primaryModel: String = "deepseek-chat",
+    private val fallbackModel: String = "deepseek-chat"
 ) : NovelSearchService {
 
     private val client = OkHttpClient.Builder()
@@ -121,7 +121,7 @@ class SiliconFlowNovelSearchService(
                 protagonist = j.optString("protagonist").ifBlank { null },
                 highlights = j.optString("highlights").ifBlank { null },
                 tags = tags,
-                source = "AI · SiliconFlow"
+                source = "AI · DeepSeek"
             )
         } catch (e: Exception) {
             // Model returned non-JSON; keep it as synopsis so nothing is lost.

@@ -19,10 +19,10 @@ android {
             useSupportLibrary = true
         }
 
-        // SiliconFlow API key for the AI novel-lookup (OCR text -> title/author/synopsis/...).
+        // DeepSeek API key for the AI novel-lookup (OCR text -> title/author/synopsis/...).
         // Stored here (private repo) so the CI build can embed it; rotate if leaked.
-        buildConfigField("String", "SILICONFLOW_API_KEY", "\"sk-87c5a100bd0446ffb5b6e628e063d25f\"")
-        buildConfigField("String", "SILICONFLOW_BASE_URL", "\"https://api.siliconflow.cn/v1/\"")
+        buildConfigField("String", "SILICONFLOW_API_KEY", "\"sk-e39355bf657342ab807e3f845b411fc0\"")
+        buildConfigField("String", "SILICONFLOW_BASE_URL", "\"https://api.deepseek.com/v1/\"")
     }
 
     signingConfigs {
