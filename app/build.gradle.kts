@@ -26,10 +26,11 @@ android {
     }
 
     signingConfigs {
-        // Fixed debug keystore committed to the repo so every CI build shares the
-        // same signature -> the app can be updated by overwriting instead of
-        // uninstalling first. (Debug key only; not a release/secret key.)
-        create("debug") {
+        // AGP already creates a default "debug" config; override it with our
+        // committed keystore so every CI build shares the same signature and
+        // the app can be updated by overwriting instead of uninstalling first.
+        // (Debug key only; not a release/secret key.)
+        getByName("debug") {
             storeFile = file("debug.keystore")
             storePassword = "android"
             keyAlias = "androiddebugkey"
