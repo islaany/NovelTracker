@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -99,13 +100,13 @@ fun HomeScreen(
                         placeholder = { Text("搜索书名或标签，如：玄幻") },
                         singleLine = true,
                         leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-                        trailingIcon = if (query.isNotEmpty()) {
-                            {
+                        trailingIcon = {
+                            if (query.isNotEmpty()) {
                                 IconButton(onClick = { viewModel.setQuery("") }) {
                                     Icon(Icons.Default.Close, contentDescription = "清除")
                                 }
                             }
-                        } else null
+                        }
                     )
                 }
 
