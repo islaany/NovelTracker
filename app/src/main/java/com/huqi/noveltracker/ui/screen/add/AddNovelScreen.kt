@@ -27,6 +27,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -39,6 +40,8 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -60,6 +63,7 @@ fun AddNovelScreen(
 ) {
     val step by viewModel.step.collectAsState()
     val importPhase by viewModel.importPhase.collectAsState()
+    val error by viewModel.error.collectAsState()
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) viewModel.onImagePicked(uri)
     }
@@ -86,8 +90,35 @@ fun AddNovelScreen(
             StepHeader(step = step)
             Spacer(modifier = Modifier.height(12.dp))
 
+            // Visible error feedback so a failed import never looks like "nothing happened".
+            error?.let {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            it,
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            style = MaterialTheme.typography.labelMedium,
+                            modifier = Modifier.weight(1f)
+                        )
+                        IconButton(onClick = viewModel::clearError) {
+                            Icon(Icons.Filled.Refresh, contentDescription = "关闭")
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+
             when (step) {
-                AddStep.PICK -> PickStep { launcher.launch("image/*") }
+                AddStep.PICK -> PickStep(
+                    onPick = { launcher.launch("image/*") },
+                    onManual = { viewModel.startManualSearch(it) }
+                )
                 AddStep.IMPORTING -> ImportingStep(phase = importPhase)
                 AddStep.REVIEW -> ReviewStep(
                     viewModel = viewModel,
@@ -159,22 +190,39 @@ private fun StepHeader(step: AddStep) {
 }
 
 @Composable
-private fun PickStep(onPick: () -> Unit) {
-    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Button(
-                onClick = onPick,
-                modifier = Modifier.fillMaxWidth(0.8f)
-            ) {
-                Text("导入小说截图")
-            }
-            Spacer(modifier = Modifier.height(10.dp))
-            Text(
-                text = "选择一张阅读软件里的截图，自动识别书名并生成记录",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                textAlign = TextAlign.Center
-            )
+private fun PickStep(onPick: () -> Unit, onManual: (String) -> Unit) {
+    val manualTitle = remember { mutableStateOf("") }
+    Column(
+        modifier = Modifier.verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Button(
+            onClick = onPick,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("导入小说截图")
+        }
+        Text(
+            text = "选择一张阅读软件里的截图，自动识别书名并生成记录",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+            textAlign = TextAlign.Center
+        )
+
+        HorizontalDivider()
+        Text("或手动输入书名", style = MaterialTheme.typography.labelMedium)
+        OutlinedTextField(
+            value = manualTitle.value,
+            onValueChange = { manualTitle.value = it },
+            label = { Text("书名（如：庆余年）") },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true
+        )
+        Button(
+            onClick = { onManual(manualTitle.value) },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("用 AI 生成记录")
         }
     }
 }

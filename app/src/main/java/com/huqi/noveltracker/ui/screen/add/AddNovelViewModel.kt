@@ -64,9 +64,15 @@ class AddNovelViewModel(application: Application) : AndroidViewModel(application
     private val _wantRecommend = MutableStateFlow(false)
     val wantRecommend: StateFlow<Boolean> = _wantRecommend.asStateFlow()
 
+    private val _error = MutableStateFlow<String?>(null)
+    val error: StateFlow<String?> = _error.asStateFlow()
+
+    fun clearError() { _error.value = null }
+
     // ---- flow ----
 
     fun onImagePicked(uri: Uri) {
+        _error.value = null
         _imageUri.value = uri
         _step.value = AddStep.IMPORTING
         runImport(uri)
@@ -79,33 +85,82 @@ class AddNovelViewModel(application: Application) : AndroidViewModel(application
 
     private fun runImport(uri: Uri) {
         viewModelScope.launch {
-            // 1) OCR
-            _importPhase.value = ImportPhase.OCR
-            val bitmap = uri.toBitmap(getApplication())
-            val text = bitmap?.let { runCatching { ocrEngine.recognize(it) }.getOrDefault("") } ?: ""
-            _ocrText.value = text
+            try {
+                // 1) OCR
+                _importPhase.value = ImportPhase.OCR
+                val bitmap = uri.toBitmap(getApplication())
+                if (bitmap == null) {
+                    _error.value = "无法读取这张图片，请换一张，或用手动输入书名"
+                    _step.value = AddStep.PICK
+                    return@launch
+                }
+                val text = runCatching { ocrEngine.recognize(bitmap) }.getOrDefault("")
+                _ocrText.value = text
 
-            // 2) AI lookup (uses the first meaningful OCR line as the query)
-            _importPhase.value = ImportPhase.SEARCH
-            val query = text.lines().firstOrNull { it.isNotBlank() } ?: text.trim()
-            val result = if (query.isNotBlank())
-                runCatching { searchService.search(query) }.getOrNull() else null
+                // 2) AI lookup (uses the first meaningful OCR line as the query)
+                _importPhase.value = ImportPhase.SEARCH
+                val query = text.lines().firstOrNull { it.isNotBlank() } ?: text.trim()
+                if (query.isBlank()) {
+                    _error.value = "没从截图上识别到文字，请手动输入书名"
+                    _step.value = AddStep.PICK
+                    return@launch
+                }
+                val result = runCatching { searchService.search(query) }.getOrNull()
 
-            _draft.value = AddDraft(
-                title = result?.title ?: query,
-                author = result?.author ?: "",
-                coverUrl = result?.coverUrl ?: "",
-                synopsis = result?.synopsis ?: "",
-                protagonist = result?.protagonist ?: "",
-                highlights = result?.highlights ?: "",
-                source = result?.source ?: ""
-            )
-            _selectedTags.value = (result?.tags ?: emptyList<String>()).toSet()
+                _draft.value = AddDraft(
+                    title = result?.title ?: query,
+                    author = result?.author ?: "",
+                    coverUrl = result?.coverUrl ?: "",
+                    synopsis = result?.synopsis ?: "",
+                    protagonist = result?.protagonist ?: "",
+                    highlights = result?.highlights ?: "",
+                    source = result?.source ?: ""
+                )
+                _selectedTags.value = (result?.tags ?: emptyList<String>()).toSet()
 
-            // 3) finished — show "导入完成" briefly, then advance to the editable review screen
-            _importPhase.value = ImportPhase.DONE
-            delay(900)
-            _step.value = AddStep.REVIEW
+                // 3) finished — show "导入完成" briefly, then advance to the editable review screen
+                _importPhase.value = ImportPhase.DONE
+                delay(900)
+                _step.value = AddStep.REVIEW
+            } catch (e: Exception) {
+                _error.value = "导入失败：${e.message ?: e.javaClass.simpleName}"
+                _step.value = AddStep.PICK
+            }
+        }
+    }
+
+    /**
+     * Manual path: skip the screenshot/OCR step entirely and let the AI generate the
+     * record from a title the user typed. Guarantees a working flow even if the image
+     * picker or on-device OCR misbehaves on a particular device.
+     */
+    fun startManualSearch(rawTitle: String) {
+        val title = rawTitle.trim()
+        if (title.isBlank()) { _error.value = "请输入书名"; return }
+        _error.value = null
+        _ocrText.value = title
+        _step.value = AddStep.IMPORTING
+        _importPhase.value = ImportPhase.SEARCH
+        viewModelScope.launch {
+            try {
+                val result = runCatching { searchService.search(title) }.getOrNull()
+                _draft.value = AddDraft(
+                    title = result?.title ?: title,
+                    author = result?.author ?: "",
+                    coverUrl = result?.coverUrl ?: "",
+                    synopsis = result?.synopsis ?: "",
+                    protagonist = result?.protagonist ?: "",
+                    highlights = result?.highlights ?: "",
+                    source = result?.source ?: ""
+                )
+                _selectedTags.value = (result?.tags ?: emptyList<String>()).toSet()
+                _importPhase.value = ImportPhase.DONE
+                delay(900)
+                _step.value = AddStep.REVIEW
+            } catch (e: Exception) {
+                _error.value = "生成失败：${e.message ?: e.javaClass.simpleName}"
+                _step.value = AddStep.PICK
+            }
         }
     }
 
