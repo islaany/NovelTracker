@@ -249,6 +249,7 @@ private fun ImportingStep(phase: ImportPhase) {
 @Composable
 private fun ReviewStep(viewModel: AddNovelViewModel, onSave: () -> Unit) {
     val d by viewModel.draft.collectAsState()
+    val ocrText by viewModel.ocrText.collectAsState()
     val catalog = viewModel.tags.collectAsState().value.map { it.name }.toSet()
     val selectedTags by viewModel.selectedTags.collectAsState()
     val wantReRead by viewModel.wantReRead.collectAsState()
@@ -280,6 +281,26 @@ private fun ReviewStep(viewModel: AddNovelViewModel, onSave: () -> Unit) {
                     "导入完成，可修改后保存到书架",
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+            }
+        }
+
+        // 让 AI 实际看到的「识别原文」可见，便于核对 OCR 是否读对、一起定位问题
+        Card(
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(12.dp)) {
+                Text(
+                    "识别原文（OCR）",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = if (ocrText.isBlank()) "（未识别到任何文字）" else ocrText,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f)
                 )
             }
         }

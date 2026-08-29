@@ -17,6 +17,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlin.math.maxOf
+import kotlin.math.minOf
 
 enum class AddStep { PICK, IMPORTING, REVIEW }
 enum class ImportPhase { OCR, SEARCH, DONE }
@@ -97,9 +99,12 @@ class AddNovelViewModel(application: Application) : AndroidViewModel(application
                 val text = runCatching { ocrEngine.recognize(bitmap) }.getOrDefault("")
                 _ocrText.value = text
 
-                // 2) AI lookup (uses the first meaningful OCR line as the query)
+                // 2) AI lookup — send the WHOLE OCR text (capped) so the model can find the
+                //    book title / author wherever they appear, instead of only the first line
+                //    (which is often a chapter title like "第一章 xxx", not the book name).
                 _importPhase.value = ImportPhase.SEARCH
-                val query = text.lines().firstOrNull { it.isNotBlank() } ?: text.trim()
+                val firstLine = text.lines().firstOrNull { it.isNotBlank() } ?: ""
+                val query = text.lines().take(60).joinToString("\n").trim().take(2000)
                 if (query.isBlank()) {
                     _error.value = "没从截图上识别到文字，请手动输入书名"
                     _step.value = AddStep.PICK
@@ -108,7 +113,7 @@ class AddNovelViewModel(application: Application) : AndroidViewModel(application
                 val result = runCatching { searchService.search(query) }.getOrNull()
 
                 _draft.value = AddDraft(
-                    title = result?.title ?: query,
+                    title = result?.title ?: firstLine,
                     author = result?.author ?: "",
                     coverUrl = result?.coverUrl ?: "",
                     synopsis = result?.synopsis ?: "",
@@ -212,8 +217,20 @@ class AddNovelViewModel(application: Application) : AndroidViewModel(application
     }
 
     private fun Uri.toBitmap(context: Context): Bitmap? = runCatching {
-        context.contentResolver.openInputStream(this)?.use {
-            BitmapFactory.decodeStream(it)
+        context.contentResolver.openInputStream(this)?.use { stream ->
+            val raw = BitmapFactory.decodeStream(stream) ?: return@runCatching null
+            // Downscale very large screenshots so OCR is fast and the whole image is
+            // processed (ML Kit can otherwise be slow / truncate on huge bitmaps).
+            val maxDim = 1600
+            val scale = minOf(1f, maxDim.toFloat() / maxOf(raw.width, raw.height))
+            if (scale < 1f) {
+                Bitmap.createScaledBitmap(
+                    raw,
+                    (raw.width * scale).toInt(),
+                    (raw.height * scale).toInt(),
+                    true
+                ).also { raw.recycle() }
+            } else raw
         }
     }.getOrNull()
 }
