@@ -66,39 +66,41 @@ class SiliconFlowNovelSearchService(
         NovelSearchResult(title = query, source = "OCR")
     }
 
-    private fun callModel(model: String, userContent: String): String? = try {
-        val body = JSONObject().apply {
-            put("model", model)
-            put("messages", JSONArray().apply {
-                put(JSONObject().put("role", "system").put("content", systemPrompt))
-                put(JSONObject().put("role", "user").put("content", userContent))
-            })
-            put("response_format", JSONObject().put("type", "json_object"))
-            put("temperature", 0.3)
-            put("max_tokens", 1200)
-        }.toString()
+    private fun callModel(model: String, userContent: String): String? {
+        return try {
+            val body = JSONObject().apply {
+                put("model", model)
+                put("messages", JSONArray().apply {
+                    put(JSONObject().put("role", "system").put("content", systemPrompt))
+                    put(JSONObject().put("role", "user").put("content", userContent))
+                })
+                put("response_format", JSONObject().put("type", "json_object"))
+                put("temperature", 0.3)
+                put("max_tokens", 1200)
+            }.toString()
 
-        val request = Request.Builder()
-            .url(baseUrl + "chat/completions")
-            .addHeader("Authorization", "Bearer $apiKey")
-            .addHeader("Content-Type", "application/json")
-            .post(body.toRequestBody(mediaType))
-            .build()
+            val request = Request.Builder()
+                .url(baseUrl + "chat/completions")
+                .addHeader("Authorization", "Bearer $apiKey")
+                .addHeader("Content-Type", "application/json")
+                .post(body.toRequestBody(mediaType))
+                .build()
 
-        val response = client.newCall(request).execute()
-        if (!response.isSuccessful) {
-            Log.w("NovelAI", "model $model http ${response.code}: ${response.message}")
-            return null
+            val response = client.newCall(request).execute()
+            if (!response.isSuccessful) {
+                Log.w("NovelAI", "model $model http ${response.code}: ${response.message}")
+                return null
+            }
+            val bodyStr = response.body?.string() ?: return null
+            JSONObject(bodyStr)
+                .getJSONArray("choices")
+                .getJSONObject(0)
+                .getJSONObject("message")
+                .getString("content")
+        } catch (e: Exception) {
+            Log.w("NovelAI", "model $model error: ${e.message}")
+            null
         }
-        val bodyStr = response.body?.string() ?: return null
-        JSONObject(bodyStr)
-            .getJSONArray("choices")
-            .getJSONObject(0)
-            .getJSONObject("message")
-            .getString("content")
-    } catch (e: Exception) {
-        Log.w("NovelAI", "model $model error: ${e.message}")
-        null
     }
 
     private fun parse(content: String, fallbackTitle: String): NovelSearchResult {
