@@ -12,7 +12,7 @@ import com.huqi.noveltracker.data.local.entity.TagEntity
 
 @Database(
     entities = [NovelEntity::class, TagEntity::class],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -31,6 +31,13 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /** v2 -> v3: remember the web sources the AI actually consulted. */
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE novels ADD COLUMN sources TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
         @Volatile
         private var INSTANCE: AppDatabase? = null
 
@@ -40,7 +47,7 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "novel_tracker_db"
-                ).addMigrations(MIGRATION_1_2)
+                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                     .fallbackToDestructiveMigration()
                     .build()
                 INSTANCE = instance

@@ -19,6 +19,8 @@ data class Novel(
     /** Finer-grained tags — unlimited. */
     val subTags: List<String> = emptyList(),
     val source: String? = null,
+    /** "标题|URL" entries the AI actually consulted — lets the user verify the data. */
+    val sources: List<String> = emptyList(),
     val addedAt: Long = System.currentTimeMillis()
 ) {
     /** Backwards-compatible union of main + sub tags (used by cards/filters). */

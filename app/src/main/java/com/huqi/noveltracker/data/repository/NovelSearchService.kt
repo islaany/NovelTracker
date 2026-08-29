@@ -11,7 +11,11 @@ data class NovelSearchResult(
     val protagonist: String? = null,
     val highlights: String? = null,
     val tags: List<String> = emptyList(),
-    val source: String? = null
+    val source: String? = null,
+    /** False when the web search could not verify the book — fields were left blank. */
+    val found: Boolean = true,
+    /** "标题|URL" entries the model actually consulted. */
+    val sources: List<String> = emptyList()
 )
 
 /**
@@ -31,4 +35,7 @@ interface NovelSearchService {
      * Default no-op so mock/simple implementations don't have to care.
      */
     fun setUserVocabulary(words: List<String>) {}
+
+    /** Remaining account balance in CNY (e.g. "9.92"), or null when unavailable. */
+    suspend fun getBalanceCny(): String? = null
 }

@@ -70,6 +70,7 @@ fun AddNovelScreen(
     val step by viewModel.step.collectAsState()
     val importPhase by viewModel.importPhase.collectAsState()
     val error by viewModel.error.collectAsState()
+    val balance by viewModel.balance.collectAsState()
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) viewModel.onImagePicked(uri)
     }
@@ -122,6 +123,7 @@ fun AddNovelScreen(
 
             when (step) {
                 AddStep.PICK -> PickStep(
+                    balance = balance,
                     onPick = { launcher.launch("image/*") },
                     onManual = { viewModel.startManualSearch(it) }
                 )
@@ -201,12 +203,19 @@ private fun StepHeader(step: AddStep) {
 }
 
 @Composable
-private fun PickStep(onPick: () -> Unit, onManual: (String) -> Unit) {
+private fun PickStep(balance: String?, onPick: () -> Unit, onManual: (String) -> Unit) {
     val manualTitle = remember { mutableStateOf("") }
     Column(
         modifier = Modifier.verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        balance?.let {
+            Text(
+                "DeepSeek 余额：¥$it",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+            )
+        }
         Button(
             onClick = onPick,
             modifier = Modifier.fillMaxWidth()
@@ -247,7 +256,7 @@ private fun ImportingStep(phase: ImportPhase) {
             Text(
                 text = when (phase) {
                     ImportPhase.OCR -> "正在导入…\n识别截图文字中"
-                    ImportPhase.SEARCH -> "正在导入…\n生成书籍资料中"
+                    ImportPhase.SEARCH -> "正在导入…\n联网搜索这本书的资料\n（约 10–30 秒，请稍候）"
                     ImportPhase.DONE -> "✅ 导入完成"
                 },
                 style = MaterialTheme.typography.bodyLarge,
@@ -273,6 +282,8 @@ private fun ReviewStep(
     val wantRecommend by viewModel.wantRecommend.collectAsState()
     val tagQuery by viewModel.tagQuery.collectAsState()
     val duplicate by viewModel.duplicate.collectAsState()
+    val sources by viewModel.sources.collectAsState()
+    val verified by viewModel.verified.collectAsState()
     val colorMap = catalogTags.associate { it.name to it.color }
 
     val allTagNames = (catalogTags.map { it.name }.toSet() + mainTags + subTags).toList()
@@ -365,6 +376,47 @@ private fun ReviewStep(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f)
                 )
+            }
+        }
+
+        // 没能联网核实 → 明确警示，不让猜测冒充事实
+        if (!verified) {
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.errorContainer
+                ),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    "没能联网核实这本书。以下资料可能不准，请自行核对；查不到的字段请手动填写。",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                    modifier = Modifier.padding(12.dp)
+                )
+            }
+        }
+
+        // AI 实际参考的来源，方便自己核对
+        if (sources.isNotEmpty()) {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Text(
+                        "资料来源（AI 联网查证）",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    sources.forEach { s ->
+                        Text(
+                            "· ${s.substringBefore("|")}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f)
+                        )
+                    }
+                }
             }
         }
 

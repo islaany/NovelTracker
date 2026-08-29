@@ -80,8 +80,28 @@ class AddNovelViewModel(application: Application) : AndroidViewModel(application
     private val _duplicate = MutableStateFlow<Novel?>(null)
     val duplicate: StateFlow<Novel?> = _duplicate.asStateFlow()
 
+    /** Sources the AI actually consulted, "标题|URL" — shown so the user can verify. */
+    private val _sources = MutableStateFlow<List<String>>(emptyList())
+    val sources: StateFlow<List<String>> = _sources.asStateFlow()
+
+    /** True when the data came back from a real web search, false = unverified. */
+    private val _verified = MutableStateFlow(false)
+    val verified: StateFlow<Boolean> = _verified.asStateFlow()
+
+    /** Remaining DeepSeek balance (CNY) so the user can see what an import costs. */
+    private val _balance = MutableStateFlow<String?>(null)
+    val balance: StateFlow<String?> = _balance.asStateFlow()
+
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error.asStateFlow()
+
+    init { refreshBalance() }
+
+    fun refreshBalance() {
+        viewModelScope.launch {
+            _balance.value = runCatching { searchService.getBalanceCny() }.getOrNull()
+        }
+    }
 
     fun clearError() { _error.value = null }
     fun setTagQuery(q: String) { _tagQuery.value = q }
@@ -145,6 +165,9 @@ class AddNovelViewModel(application: Application) : AndroidViewModel(application
                     .map { TagCatalog.normalize(it) }
                     .toSet()
                 _mainTags.value = emptySet()
+                _sources.value = result?.sources.orEmpty()
+                _verified.value = result?.found == true
+                refreshBalance()
                 _duplicate.value = findDuplicate(result?.title ?: firstLine)
 
                 // 3) finished — show "导入完成" briefly, then advance to the editable review screen
@@ -187,6 +210,9 @@ class AddNovelViewModel(application: Application) : AndroidViewModel(application
                     .map { TagCatalog.normalize(it) }
                     .toSet()
                 _mainTags.value = emptySet()
+                _sources.value = result?.sources.orEmpty()
+                _verified.value = result?.found == true
+                refreshBalance()
                 _duplicate.value = findDuplicate(result?.title ?: title)
                 _importPhase.value = ImportPhase.DONE
                 delay(900)
@@ -307,7 +333,8 @@ class AddNovelViewModel(application: Application) : AndroidViewModel(application
                 wantRecommend = _wantRecommend.value || existing.wantRecommend == true,
                 mainTags = mergedMain,
                 subTags = mergedSub,
-                source = d.source.takeIf { it.isNotBlank() } ?: existing.source
+                source = d.source.takeIf { it.isNotBlank() } ?: existing.source,
+                sources = (existing.sources + _sources.value).distinct()
             )
             return runCatching { repo.upsert(merged) }.getOrNull()
         }
@@ -323,7 +350,8 @@ class AddNovelViewModel(application: Application) : AndroidViewModel(application
             wantRecommend = _wantRecommend.value,
             mainTags = main,
             subTags = sub,
-            source = d.source.ifBlank { null }
+            source = d.source.ifBlank { null },
+            sources = _sources.value
         )
         return runCatching { repo.upsert(novel) }.getOrNull()?.takeIf { id -> id > 0L }
     }

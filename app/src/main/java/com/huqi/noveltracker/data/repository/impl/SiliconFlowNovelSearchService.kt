@@ -30,15 +30,22 @@ class SiliconFlowNovelSearchService(
     private val apiKey: String,
     private val baseUrl: String = "https://api.deepseek.com/v1/",
     private val primaryModel: String = "deepseek-chat",
-    private val fallbackModel: String = "deepseek-chat"
+    private val fallbackModel: String = "deepseek-chat",
+    /** Only this model family supports DeepSeek's server-side web_search tool. */
+    private val searchModel: String = "deepseek-v4-flash"
 ) : NovelSearchService {
 
+    // Web search browses and reads pages, so it needs a much longer read timeout.
     private val client = OkHttpClient.Builder()
         .connectTimeout(20, TimeUnit.SECONDS)
-        .readTimeout(60, TimeUnit.SECONDS)
+        .readTimeout(150, TimeUnit.SECONDS)
         .build()
 
     private val mediaType = "application/json".toMediaType()
+
+    /** ".../v1/" -> ".../responses" — the Responses API lives outside /v1. */
+    private val responsesUrl: String = baseUrl.substringBefore("/v1/") + "/responses"
+    private val balanceUrl: String = baseUrl.substringBefore("/v1/") + "/user/balance"
 
     /**
      * Words the user has created or kept outside the built-in catalog. Fed back into
@@ -77,16 +84,156 @@ class SiliconFlowNovelSearchService(
         val query = title.trim()
         if (query.isBlank()) return@withContext null
 
+        // A raw OCR dump is long; a short string is already a clean title (manual entry).
+        val bookTitle = if (query.length > 40) {
+            extractTitle(query)
+                ?: query.lines().firstOrNull { it.isNotBlank() }?.take(40)
+                ?: query
+        } else query
+
+        // 1) Preferred path: the model really searches the web, so the author and
+        //    synopsis come from citations instead of guesses.
+        searchWeb(bookTitle)?.let { return@withContext it }
+
+        // 2) Search unavailable — fall back to knowledge-only generation, but flag
+        //    the result as unverified so the UI can warn instead of presenting
+        //    guesses as fact.
         val userContent = "以下是 OCR 文本：\n$query"
         for (model in listOf(primaryModel, fallbackModel)) {
             val content = callModel(model, userContent)
             if (!content.isNullOrBlank()) {
-                return@withContext parse(content, query)
+                return@withContext parse(content, bookTitle).copy(
+                    source = "AI · 未联网核实",
+                    found = false
+                )
             }
         }
-        // All models failed (e.g. offline / no balance): still return the title so the
-        // record can be saved and the user can fill the rest manually.
-        NovelSearchResult(title = query, source = "OCR")
+        // Everything failed: keep the title so the record can still be saved manually.
+        NovelSearchResult(title = bookTitle, source = "OCR", found = false)
+    }
+
+    /**
+     * Grounded lookup via the Responses API + the server-side `web_search` tool.
+     * DeepSeek runs the search itself, so no third-party search key is needed.
+     */
+    private fun searchWeb(bookTitle: String): NovelSearchResult? {
+        return try {
+            val body = JSONObject().apply {
+                put("model", searchModel)
+                put("tools", JSONArray().put(JSONObject().put("type", "web_search")))
+                put("text", JSONObject().put("format", JSONObject().put("type", "json_object")))
+                put("input", webPrompt(bookTitle))
+            }.toString()
+
+            val request = Request.Builder()
+                .url(responsesUrl)
+                .addHeader("Authorization", "Bearer $apiKey")
+                .addHeader("Content-Type", "application/json")
+                .post(body.toRequestBody(mediaType))
+                .build()
+
+            val response = client.newCall(request).execute()
+            if (!response.isSuccessful) {
+                Log.w("NovelAI", "web search http ${response.code}: ${response.message}")
+                return null
+            }
+            val bodyStr = response.body?.string() ?: return null
+            val root = JSONObject(bodyStr)
+            // The Responses API always includes an "error" key; it is null on success.
+            if (!root.isNull("error")) {
+                Log.w("NovelAI", "web search error: ${root.opt("error")}")
+                return null
+            }
+
+            val output = root.optJSONArray("output") ?: return null
+            var text: String? = null
+            for (i in 0 until output.length()) {
+                val item = output.optJSONObject(i) ?: continue
+                if (item.optString("type") != "message") continue
+                val content = item.optJSONArray("content") ?: continue
+                for (c in 0 until content.length()) {
+                    val part = content.optJSONObject(c) ?: continue
+                    if (part.optString("type") == "output_text") text = part.optString("text")
+                }
+            }
+            if (text.isNullOrBlank()) return null
+            parse(text, bookTitle).copy(source = "AI · 联网搜索")
+        } catch (e: Exception) {
+            Log.w("NovelAI", "web search failed: ${e.message}")
+            null
+        }
+    }
+
+    private fun webPrompt(bookTitle: String): String = """
+        你是一个小说资料助手，并且**必须先调用联网搜索工具查证**，再回答。
+        任务：查证并整理小说《$bookTitle》的真实资料。
+
+        严格要求：
+        1. 必须先联网搜索，不得只凭记忆作答。
+        2. 严禁编造：任何字段如果在搜索结果中找不到可靠依据，就返回空字符串，并把 found 设为 false。
+        3. 特别禁止：不要把小说正文或截图里出现的人物名字当成作者。
+        4. author 填作者最常用的笔名（如"墨香铜臭"），本名可放在笔名后的括号里；查不到就留空字符串。
+        5. synopsis：120字以内的剧情简介；protagonist：主角名；highlights：3-5条高光/名场面，每条以"· "开头，换行分隔。
+        6. tags：从下面的题材库中挑选 3-5 个最贴切的，**原样使用库中的词，不要改写、不要自造近义词**：
+        ${TagCatalog.promptList}
+        7. sources：列出你实际参考的 2-4 个来源，每条格式为 "标题|URL"。
+
+        只输出严格 JSON，不要任何解释或 Markdown 代码块：
+        {"title":"","author":"","synopsis":"","protagonist":"","highlights":"","tags":[""],"found":true,"sources":["标题|URL"]}
+    """.trimIndent()
+
+    /** Cheap call that turns a raw OCR dump into a clean book title. */
+    private fun extractTitle(ocr: String): String? {
+        return try {
+            val body = JSONObject().apply {
+                put("model", primaryModel)
+                put("messages", JSONArray().apply {
+                    put(JSONObject().put("role", "user").put("content",
+                        "下面是从阅读软件截图 OCR 出来的文字。请只输出这本小说的书名" +
+                            "（不要解释、不要标点、不要章节名）：\n$ocr"))
+                })
+                put("max_tokens", 50)
+                put("temperature", 0.1)
+            }.toString()
+
+            val request = Request.Builder()
+                .url(baseUrl + "chat/completions")
+                .addHeader("Authorization", "Bearer $apiKey")
+                .addHeader("Content-Type", "application/json")
+                .post(body.toRequestBody(mediaType))
+                .build()
+
+            val response = client.newCall(request).execute()
+            if (!response.isSuccessful) return null
+            val bodyStr = response.body?.string() ?: return null
+            JSONObject(bodyStr)
+                .getJSONArray("choices")
+                .getJSONObject(0)
+                .getJSONObject("message")
+                .getString("content")
+                .trim()
+                .takeIf { it.isNotBlank() && it.length <= 60 }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    override suspend fun getBalanceCny(): String? = withContext(Dispatchers.IO) {
+        try {
+            val request = Request.Builder()
+                .url(balanceUrl)
+                .addHeader("Authorization", "Bearer $apiKey")
+                .get()
+                .build()
+            val response = client.newCall(request).execute()
+            if (!response.isSuccessful) return@withContext null
+            val bodyStr = response.body?.string() ?: return@withContext null
+            val infos = JSONObject(bodyStr).optJSONArray("balance_infos") ?: return@withContext null
+            val first = infos.optJSONObject(0) ?: return@withContext null
+            first.optString("total_balance").takeIf { it.isNotBlank() }
+        } catch (e: Exception) {
+            null
+        }
     }
 
     private fun callModel(model: String, userContent: String): String? {
@@ -141,6 +288,13 @@ class SiliconFlowNovelSearchService(
                     }
                 }
             }
+            val sources = mutableListOf<String>()
+            j.optJSONArray("sources")?.let { arr ->
+                for (i in 0 until arr.length()) {
+                    arr.optString(i).takeIf { it.isNotBlank() }?.let { sources.add(it) }
+                }
+            }
+
             NovelSearchResult(
                 title = j.optString("title").ifBlank { fallbackTitle },
                 author = j.optString("author").ifBlank { null },
@@ -149,11 +303,19 @@ class SiliconFlowNovelSearchService(
                 protagonist = j.optString("protagonist").ifBlank { null },
                 highlights = j.optString("highlights").ifBlank { null },
                 tags = tags,
-                source = "AI · DeepSeek"
+                source = "AI · DeepSeek",
+                found = j.optBoolean("found", true),
+                sources = sources
             )
         } catch (e: Exception) {
-            // Model returned non-JSON; keep it as synopsis so nothing is lost.
-            NovelSearchResult(title = fallbackTitle, synopsis = content.takeIf { it.isNotBlank() }, source = "AI-raw")
+            // Model returned non-JSON; keep it as synopsis so nothing is lost, but
+            // mark it unverified.
+            NovelSearchResult(
+                title = fallbackTitle,
+                synopsis = content.takeIf { it.isNotBlank() },
+                source = "AI-raw",
+                found = false
+            )
         }
     }
 }

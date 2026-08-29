@@ -19,6 +19,7 @@ data class NovelEntity(
     val mainTags: List<String>,
     val subTags: List<String>,
     val source: String?,
+    val sources: List<String> = emptyList(),
     val addedAt: Long
 )
 
@@ -35,6 +36,7 @@ fun NovelEntity.toModel(): Novel = Novel(
     mainTags = mainTags,
     subTags = subTags,
     source = source,
+    sources = sources,
     addedAt = addedAt
 )
 
@@ -51,5 +53,6 @@ fun Novel.toEntity(): NovelEntity = NovelEntity(
     mainTags = mainTags,
     subTags = subTags,
     source = source,
+    sources = sources,
     addedAt = addedAt
 )

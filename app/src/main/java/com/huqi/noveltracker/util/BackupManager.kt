@@ -104,6 +104,7 @@ object BackupManager {
                         mainTags = o.strList("mainTags"),
                         subTags = o.strList("subTags"),
                         source = o.optString("source").takeIf { it.isNotBlank() },
+                        sources = o.strList("sources"),
                         addedAt = o.optLong("addedAt", System.currentTimeMillis())
                     )
                 )
@@ -124,6 +125,7 @@ object BackupManager {
         put("mainTags", JSONArray().apply { mainTags.forEach { put(it) } })
         put("subTags", JSONArray().apply { subTags.forEach { put(it) } })
         put("source", source ?: "")
+        put("sources", JSONArray().apply { sources.forEach { put(it) } })
         put("addedAt", addedAt)
     }
 
