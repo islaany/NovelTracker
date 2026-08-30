@@ -146,6 +146,11 @@ class AddNovelViewModel(application: Application) : AndroidViewModel(application
                     return@launch
                 }
                 feedUserVocabulary()
+                if (!runCatching { searchService.isConfigured() }.getOrDefault(false)) {
+                    _error.value = "请先在「设置」里配置 API Key（可用免费 SiliconFlow key，或在 DeepSeek 预设下填你自己的 key 开启联网搜索）"
+                    _step.value = AddStep.PICK
+                    return@launch
+                }
                 val result = runCatching { searchService.search(query) }.getOrNull()
 
                 _draft.value = AddDraft(
@@ -196,6 +201,11 @@ class AddNovelViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch {
             try {
                 feedUserVocabulary()
+                if (!runCatching { searchService.isConfigured() }.getOrDefault(false)) {
+                    _error.value = "请先在「设置」里配置 API Key（可用免费 SiliconFlow key，或在 DeepSeek 预设下填你自己的 key 开启联网搜索）"
+                    _step.value = AddStep.PICK
+                    return@launch
+                }
                 val result = runCatching { searchService.search(title) }.getOrNull()
                 _draft.value = AddDraft(
                     title = result?.title ?: title,

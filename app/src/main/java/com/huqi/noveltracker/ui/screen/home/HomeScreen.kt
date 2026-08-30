@@ -19,6 +19,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Sell
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Star
@@ -109,6 +110,12 @@ fun HomeScreen(
                     icon = { Icon(Icons.Default.Backup, contentDescription = null) },
                     selected = false,
                     onClick = { scope.launch { drawerState.close() }; navController.navigate(Screen.Backup.route) }
+                )
+                NavigationDrawerItem(
+                    label = { Text("API 设置") },
+                    icon = { Icon(Icons.Default.Settings, contentDescription = null) },
+                    selected = false,
+                    onClick = { scope.launch { drawerState.close() }; navController.navigate(Screen.Settings.route) }
                 )
             }
         }

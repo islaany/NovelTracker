@@ -1,7 +1,3 @@
-import java.io.File
-import java.io.FileInputStream
-import java.util.Properties
-
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -16,25 +12,15 @@ android {
         applicationId = "com.huqi.noveltracker"
         minSdk = 26
         targetSdk = 34
-        versionCode = 44
-        versionName = "0.8.0"
+        versionCode = 45
+        versionName = "0.9.0"
 
         vectorDrawables {
             useSupportLibrary = true
         }
 
-        // DeepSeek API key for the AI novel-lookup (OCR text -> title/author/synopsis/...).
-        // SECURITY: never hardcode the key in source. It is read from local.properties
-        // (gitignored) for local builds, or from the DEEPSEEK_API_KEY env var injected by
-        // CI from a GitHub Actions secret. Falls back to empty if neither is set.
-        val deepseekApiKey: String = run {
-            val props = Properties()
-            val f = File(rootProject.projectDir, "local.properties")
-            if (f.exists()) props.load(FileInputStream(f))
-            (props["deepseek.api.key"] as? String) ?: System.getenv("DEEPSEEK_API_KEY") ?: ""
-        }
-        buildConfigField("String", "SILICONFLOW_API_KEY", "\"$deepseekApiKey\"")
-        buildConfigField("String", "SILICONFLOW_BASE_URL", "\"https://api.deepseek.com/v1/\"")
+        // API key is configured at runtime via the in-app Settings screen (DataStore),
+        // so no secret is compiled into the build. See data/settings/SettingsRepository.
     }
 
     signingConfigs {
@@ -125,4 +111,7 @@ dependencies {
 
     // JSON helper for converters
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.1")
+
+    // Settings (DataStore) for runtime API key / provider configuration
+    implementation("androidx.datastore:datastore-preferences:1.1.1")
 }

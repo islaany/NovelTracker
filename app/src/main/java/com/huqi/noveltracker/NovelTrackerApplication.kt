@@ -25,8 +25,10 @@ class NovelTrackerApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         val database = AppDatabase.getDatabase(this)
+        val settingsRepository = SettingsRepository(this)
         container = AppContainer(
-            novelRepository = RoomNovelRepository(database.novelDao(), database.tagDao())
+            novelRepository = RoomNovelRepository(database.novelDao(), database.tagDao()),
+            settingsRepository = settingsRepository
         )
 
         // Seed the curated genre vocabulary on every launch (idempotent; only adds,

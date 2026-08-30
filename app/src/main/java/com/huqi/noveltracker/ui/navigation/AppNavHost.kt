@@ -11,6 +11,7 @@ import com.huqi.noveltracker.ui.screen.add.AddNovelScreen
 import com.huqi.noveltracker.ui.screen.backup.BackupScreen
 import com.huqi.noveltracker.ui.screen.detail.DetailScreen
 import com.huqi.noveltracker.ui.screen.home.HomeScreen
+import com.huqi.noveltracker.ui.screen.settings.SettingsScreen
 import com.huqi.noveltracker.ui.screen.tags.TagsScreen
 
 sealed class Screen(val route: String) {
@@ -18,6 +19,7 @@ sealed class Screen(val route: String) {
     object Add : Screen("add")
     object Tags : Screen("tags")
     object Backup : Screen("backup")
+    object Settings : Screen("settings")
     object Detail : Screen("detail/{novelId}") {
         fun createRoute(novelId: Long) = "detail/$novelId"
     }
@@ -40,6 +42,9 @@ fun AppNavHost(navController: NavHostController = rememberNavController()) {
         }
         composable(Screen.Backup.route) {
             BackupScreen(navController = navController)
+        }
+        composable(Screen.Settings.route) {
+            SettingsScreen(navController = navController)
         }
         composable(
             route = Screen.Detail.route,

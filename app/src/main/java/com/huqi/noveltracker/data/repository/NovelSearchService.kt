@@ -31,6 +31,12 @@ interface NovelSearchService {
     suspend fun search(title: String): NovelSearchResult?
 
     /**
+     * True when an API key is configured so a lookup can actually run.
+     * Lets the UI show a "configure in Settings" hint instead of a silent empty result.
+     */
+    suspend fun isConfigured(): Boolean = true
+
+    /**
      * Feed the user's own vocabulary (tags they created or kept) back to the model.
      * Default no-op so mock/simple implementations don't have to care.
      */
