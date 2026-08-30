@@ -1,3 +1,7 @@
+import java.io.File
+import java.io.FileInputStream
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -24,10 +28,9 @@ android {
         // (gitignored) for local builds, or from the DEEPSEEK_API_KEY env var injected by
         // CI from a GitHub Actions secret. Falls back to empty if neither is set.
         val deepseekApiKey: String = run {
-            val props = java.util.Properties().apply {
-                val f = rootProject.file("local.properties")
-                if (f.exists()) load(f.inputStream())
-            }
+            val props = Properties()
+            val f = File(rootProject.projectDir, "local.properties")
+            if (f.exists()) props.load(FileInputStream(f))
             (props["deepseek.api.key"] as? String) ?: System.getenv("DEEPSEEK_API_KEY") ?: ""
         }
         buildConfigField("String", "SILICONFLOW_API_KEY", "\"$deepseekApiKey\"")
