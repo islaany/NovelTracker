@@ -5,6 +5,7 @@ import androidx.core.content.edit
 import com.huqi.noveltracker.data.local.AppDatabase
 import com.huqi.noveltracker.data.repository.NovelRepository
 import com.huqi.noveltracker.data.repository.impl.RoomNovelRepository
+import com.huqi.noveltracker.data.settings.SettingsRepository
 import com.huqi.noveltracker.di.AppContainer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
