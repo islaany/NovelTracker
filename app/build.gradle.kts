@@ -20,8 +20,17 @@ android {
         }
 
         // DeepSeek API key for the AI novel-lookup (OCR text -> title/author/synopsis/...).
-        // Stored here (private repo) so the CI build can embed it; rotate if leaked.
-        buildConfigField("String", "SILICONFLOW_API_KEY", "\"sk-e39355bf657342ab807e3f845b411fc0\"")
+        // SECURITY: never hardcode the key in source. It is read from local.properties
+        // (gitignored) for local builds, or from the DEEPSEEK_API_KEY env var injected by
+        // CI from a GitHub Actions secret. Falls back to empty if neither is set.
+        val deepseekApiKey: String = run {
+            val props = java.util.Properties().apply {
+                val f = rootProject.file("local.properties")
+                if (f.exists()) load(f.inputStream())
+            }
+            (props["deepseek.api.key"] as? String) ?: System.getenv("DEEPSEEK_API_KEY") ?: ""
+        }
+        buildConfigField("String", "SILICONFLOW_API_KEY", "\"$deepseekApiKey\"")
         buildConfigField("String", "SILICONFLOW_BASE_URL", "\"https://api.deepseek.com/v1/\"")
     }
 

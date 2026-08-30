@@ -49,6 +49,16 @@ jobs:
           chmod +x gradlew
           echo "wrapper restored"
 
+      - name: Provide DeepSeek API key (from Actions secret)
+        # app/build.gradle.kts reads the key from local.properties; write it here
+        # from the DEEPSEEK_API_KEY repository secret. If the secret is unset the
+        # file just contains an empty key and the build still succeeds (AI lookup
+        # will fail at runtime until the key is provided).
+        run: |
+          set -euo pipefail
+          printf 'deepseek.api.key=%s\n' "${{ secrets.DEEPSEEK_API_KEY }}" > local.properties
+          echo "local.properties written for CI build"
+
       - name: Build debug APK
         id: build
         run: |
