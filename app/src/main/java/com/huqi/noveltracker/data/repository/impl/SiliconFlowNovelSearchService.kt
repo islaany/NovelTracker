@@ -20,20 +20,25 @@ import java.util.concurrent.TimeUnit
 /** A single web-search hit returned by Tavily / Exa, used to synthesize the record. */
 private data class SearchHit(val title: String, val url: String, val content: String)
 
+/** What the LLM extracts from noisy OCR *before* we ever touch the search API. */
+private data class OcrClean(val title: String, val author: String?, val query: String)
+
 /**
- * Real novel lookup backed by an OpenAI-compatible LLM API. The key, base URL and
- * model are read at call time from the runtime Settings (DataStore), so the same
- * APK works with any provider the user configures:
- *  - DeepSeek (api.deepseek.com) → uses the Responses API + server-side `web_search`
- *    tool for REAL web verification (author/synopsis come from citations).
- *  - SiliconFlow / any other OpenAI-compatible endpoint → knowledge-only generation
- *    (no web); results are flagged "未联网核实".
+ * Real novel lookup driven by a two-stage LLM + search pipeline. The key, base URL and
+ * model are read at call time from the runtime Settings (DataStore), so the same APK works
+ * with any OpenAI-compatible provider the user configures.
  *
- * Flow: the caller passes the full OCR text from a screenshot. The web model is given
- * the WHOLE text (title + author + noise) and extracts + verifies in one shot, so the
- * author is never discarded before searching. If web search finds nothing, we fall
- * back to knowledge generation, and finally to OCR heuristics, so the record is never
- * silently empty.
+ * Recommended pipeline (no DeepSeek required):
+ *   ① SiliconFlow (free LLM) cleans the raw, noisy OCR → extracts the real book title /
+ *     author and crafts the most accurate search query (decide WHAT to search).
+ *   ② Tavily / Exa (dedicated search API) runs the real web search with that query.
+ *   ③ SiliconFlow (free LLM) reads ALL crawled web snippets and outputs exactly the
+ *     structured record we need (title/author/synopsis/tags/...), grounded in the snippets.
+ *
+ * The LLM is the "brain" on both ends; the search API is just the crawler. DeepSeek's
+ * native web_search is an OPTIONAL alternative (only when the user explicitly enables it).
+ * If no LLM key is configured we degrade gracefully to a heuristic query + the search
+ * backend's own answer.
  */
 class SiliconFlowNovelSearchService(
     private val settings: SettingsRepository
@@ -62,38 +67,65 @@ class SiliconFlowNovelSearchService(
                 (cfg.searchBackend != SearchBackend.NONE && cfg.searchApiKey.isNotBlank())
         }.getOrDefault(false)
 
-    override suspend fun search(title: String): NovelSearchResult? = withContext(Dispatchers.IO) {
+    /**
+     * Two-stage "LLM brain + search crawler" pipeline:
+     *   ① SiliconFlow cleans the raw, noisy OCR into an accurate query (what to search).
+     *   ② Tavily / Exa performs the real web search with that query.
+     *   ③ SiliconFlow reads all crawled snippets and outputs the structured record we need.
+     * DeepSeek web_search is only used when the user explicitly enabled it (no dedicated
+     * search backend). Falls back gracefully when an LLM key is absent.
+     */
+    override suspend fun search(ocrText: String): NovelSearchResult? = withContext(Dispatchers.IO) {
         val cfg = settings.getConfig()
-        val query = title.trim()
-        if (query.isBlank()) return@withContext null
+        val raw = ocrText.trim()
+        if (raw.isBlank()) return@withContext null
 
-        // 1) Dedicated search API (Tavily / Exa) — standalone, NO LLM required.
-        //    This is the recommended "no DeepSeek" path: real web search that does not
-        //    touch DeepSeek and does not consume its quota.
-        if (cfg.searchBackend != SearchBackend.NONE && cfg.searchApiKey.isNotBlank()) {
-            searchWebViaSearchApi(query, cfg)?.let { return@withContext it }
+        val hasLLM = cfg.apiKey.isNotBlank() && cfg.baseUrl.isNotBlank()
+        val hasSearch = cfg.searchBackend != SearchBackend.NONE && cfg.searchApiKey.isNotBlank()
+
+        // ① Pre-process OCR (LLM) → accurate {title, author, query}. Heuristic fallback if no LLM key.
+        val clean = if (hasLLM) {
+            preprocessOcr(raw, cfg) ?: OcrClean(heuristicTitle(raw), null, heuristicTitle(raw) + " 小说 简介 资料")
+        } else {
+            OcrClean(heuristicTitle(raw), null, heuristicTitle(raw) + " 小说 简介 资料")
         }
 
-        // 2) DeepSeek native web_search — only when the user explicitly chose DeepSeek
-        //    (backend = NONE + webEnabled + a DeepSeek key). Never runs alongside Tavily/Exa.
-        if (cfg.searchBackend == SearchBackend.NONE && cfg.webEnabled && cfg.isDeepSeek && cfg.apiKey.isNotBlank()) {
-            searchWeb(query, cfg)?.let { return@withContext it }
+        // ② Real web search with the cleaned query.
+        if (hasSearch) {
+            val (hits, answer) = when (cfg.searchBackend) {
+                SearchBackend.TAVILY -> tavilySearch(clean.query, cfg.searchApiKey, cfg.searchMaxResults)
+                SearchBackend.EXA -> exaSearch(clean.query, cfg.searchApiKey, cfg.searchMaxResults)
+                else -> Pair(emptyList<SearchHit>(), null as String?)
+            }
+            if (hits.isNotEmpty() || !answer.isNullOrBlank()) {
+                val backendName = if (cfg.searchBackend == SearchBackend.TAVILY) "Tavily" else "Exa"
+                // ③ Synthesize the crawled results with the LLM into the record we need.
+                if (hasLLM) {
+                    synthesize(clean, hits, answer, backendName, cfg)?.let { return@withContext it }
+                }
+                // No-LLM fallback: use the search backend's own answer / top snippet directly.
+                buildFromSearch(clean, hits, answer, backendName)?.let { return@withContext it }
+            }
         }
 
-        // 3) Knowledge-only generation (needs a chat LLM key). Flagged unverified.
-        if (cfg.apiKey.isNotBlank()) {
-            val userContent = "以下是 OCR 文本：\n$query"
-            val content = callModel(cfg.chatModel, userContent, cfg)
+        // ②-alt: no dedicated search backend, but user explicitly enabled DeepSeek web_search.
+        if (!hasSearch && cfg.searchBackend == SearchBackend.NONE && cfg.webEnabled && cfg.isDeepSeek && cfg.apiKey.isNotBlank()) {
+            searchWeb(raw, cfg)?.let { return@withContext it }
+        }
+
+        // ④ Knowledge-only generation (LLM present but web search yielded nothing). Flagged.
+        if (hasLLM) {
+            val content = callModel(cfg.chatModel, "以下是 OCR 文本：\n$raw", cfg)
             if (!content.isNullOrBlank()) {
-                return@withContext parse(content, heuristicTitle(query)).copy(
+                return@withContext parse(content, clean.title).copy(
                     source = "AI · 未联网核实",
                     found = false
                 )
             }
         }
 
-        // 4) Last resort: at least prefill title/author from OCR so the record isn't empty.
-        val (t, a) = heuristicTitleAuthor(query)
+        // ⑤ Last resort: at least prefill title/author from OCR so the record isn't empty.
+        val (t, a) = heuristicTitleAuthor(raw)
         NovelSearchResult(title = t, author = a, source = "OCR", found = false)
     }
 
@@ -156,50 +188,110 @@ class SiliconFlowNovelSearchService(
     }
 
     /**
-     * Standalone web lookup via Tavily / Exa. The search API already returns a synthesized
-     * answer (Tavily `answer`, Exa `summary`), so we build the record directly — NO chat LLM
-     * is required, and DeepSeek is never involved. A chat LLM is only used as an OPTIONAL
-     * enhancement when the user also configured one (e.g. for better tag extraction).
+     * ① Pre-process: feed the raw, noisy OCR to the LLM and ask it to extract the real book
+     * title + author and craft the most accurate search query. We never send the raw OCR to
+     * the search API as-is, because it is full of chapter bodies / UI noise that would ruin
+     * the query. Returns null on failure so the caller can fall back to a heuristic query.
      */
-    private fun searchWebViaSearchApi(fullText: String, cfg: SearchConfig): NovelSearchResult? {
-        val (title, authorHint) = heuristicTitleAuthor(fullText)
-        val query = buildString {
-            append(title)
-            if (!authorHint.isNullOrBlank()) append(" $authorHint")
-            append(" 小说 作者 简介")
-        }.trim()
+    private fun preprocessOcr(raw: String, cfg: SearchConfig): OcrClean? {
+        val prompt = """
+你是一个小说信息提取助手。下面是从手机阅读软件截图里 OCR 识别出来的文字，包含大量噪声：章节标题（如"第一章 xxx"）、正文段落、UI 文字、广告等。
+请从中准确识别这本小说的**书名**和**作者**，并生成一个最适合联网搜索的查询词。
 
-        val (hits, answer) = when (cfg.searchBackend) {
-            SearchBackend.TAVILY -> tavilySearch(query, cfg.searchApiKey, cfg.searchMaxResults)
-            SearchBackend.EXA -> exaSearch(query, cfg.searchApiKey, cfg.searchMaxResults)
-            else -> Pair(emptyList<SearchHit>(), null as String?)
+要求：
+1. title：小说书名。优先取页面最上方或书籍信息栏里的书名；绝对不要把"第一章 xxx"这种章节标题当成书名。若实在无法判断，返回 OCR 里最像书名的那一行。
+2. author：作者（常见笔名）。若文字里看不到作者就返回空字符串。
+3. query：用于联网搜索的最佳查询词，建议格式为"书名 作者 小说 简介 资料"（作者未知则只用"书名 小说 资料"）。目标是让搜索引擎最容易命中这本小说的权威资料页。
+
+只输出严格 JSON，不要任何解释或 Markdown 代码块：
+{"title":"","author":"","query":""}
+
+OCR 原文：
+$raw
+""".trimIndent()
+        val json = callModel(
+            cfg.chatModel, prompt, cfg,
+            system = "你是一个严谨的信息提取助手。只输出用户要求的 JSON，不要任何解释或 Markdown 代码块。"
+        ) ?: return null
+        return try {
+            val j = JSONObject(
+                json.removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
+            )
+            val title = j.optString("title").takeIf { it.isNotBlank() } ?: heuristicTitle(raw)
+            val author = j.optString("author").takeIf { it.isNotBlank() }
+            val query = j.optString("query").takeIf { it.isNotBlank() } ?: "$title 小说 简介 资料"
+            OcrClean(title, author, query)
+        } catch (e: Exception) {
+            Log.w("NovelAI", "preprocess parse fail: ${e.message}")
+            null
         }
-        if (hits.isEmpty() && answer.isNullOrBlank()) return null
+    }
 
-        val backendName = if (cfg.searchBackend == SearchBackend.TAVILY) "Tavily" else "Exa"
+    /**
+     * ③ Synthesize: give the LLM ALL the crawled web snippets (and the engine's own answer)
+     * and have it output exactly the structured record we need, strictly grounded in the
+     * snippets. Returns null if the model produced nothing usable.
+     */
+    private fun synthesize(
+        clean: OcrClean,
+        hits: List<SearchHit>,
+        answer: String?,
+        backendName: String,
+        cfg: SearchConfig
+    ): NovelSearchResult? {
+        val snippets = buildString {
+            if (!answer.isNullOrBlank()) append("搜索引擎摘要：\n$answer\n\n")
+            if (hits.isNotEmpty()) append(
+                hits.joinToString("\n\n") { "【${it.title}】(${it.url})\n${it.content}" }
+            )
+        }.trim()
+        if (snippets.isBlank()) return null
+        val titleHint = clean.title + (if (!clean.author.isNullOrBlank()) "（作者：${clean.author}）" else "")
+        val prompt = """
+你是一个小说资料助手。下面是从联网搜索引擎（$backendName）**真实检索**到的网页片段，请**严格依据这些片段**来整理这本小说的信息。
+
+书名线索：$titleHint
+
+联网检索到的网页片段：
+$snippets
+
+要求：
+1. 从片段中确认书名和作者（不要把正文里的人物名当作者）。
+2. 简介、主角、高光、标签都应基于网页片段内容；片段中找不到的字段留空字符串。
+3. tags 从题材库原样挑选 3-5 个：${TagCatalog.promptList}
+4. 严禁编造：找不到可靠依据的字段就返回空字符串。
+
+只输出严格 JSON，不要任何解释或 Markdown 代码块：
+{"title":"","author":"","synopsis":"","protagonist":"","highlights":"","tags":[""],"found":true,"sources":["标题|URL"]}
+""".trimIndent()
+        val json = callModel(
+            cfg.chatModel, prompt, cfg,
+            system = "你是一个严谨的小说资料整理助手。严格依据给定的网页片段输出 JSON，绝不凭记忆编造。"
+        ) ?: return null
+        val result = parse(json, clean.title)
+        val hasData = result.author != null || result.synopsis != null ||
+            result.tags.isNotEmpty() || result.title.isNotBlank()
+        if (!hasData) return null
+        return result.copy(
+            source = "AI · 联网搜索($backendName)",
+            found = true,
+            sources = result.sources.ifEmpty { hits.map { "${it.title}|${it.url}" } }
+        )
+    }
+
+    /** No-LLM fallback: turn the search backend's own answer / top snippet into a minimal record. */
+    private fun buildFromSearch(
+        clean: OcrClean,
+        hits: List<SearchHit>,
+        answer: String?,
+        backendName: String
+    ): NovelSearchResult? {
         val top = hits.firstOrNull()
         val synopsis = (answer ?: top?.content).takeIf { !it.isNullOrBlank() }?.toString()?.take(400)
-        val author = authorHint ?: parseAuthor(top?.content ?: answer ?: "")
-
-        // Optional LLM enhancement — only if a chat key exists. Never blocks the core result.
-        if (cfg.apiKey.isNotBlank()) {
-            val snippets = hits.joinToString("\n\n") { "【${it.title}】(${it.url})\n${it.content}" }
-            val enhanced = runCatching {
-                callModel(cfg.chatModel, synthesizedPrompt(fullText, snippets), cfg)
-            }.getOrNull()?.let { parse(it, title) }
-            if (enhanced != null &&
-                (enhanced.author != null || enhanced.synopsis != null || enhanced.tags.isNotEmpty() || enhanced.title.isNotBlank())
-            ) {
-                return enhanced.copy(
-                    source = "AI · 联网搜索($backendName)",
-                    found = true,
-                    sources = hits.map { "${it.title}|${it.url}" }
-                )
-            }
-        }
-
+        val author = clean.author ?: parseAuthor(top?.content ?: answer ?: "")
+        if (synopsis.isNullOrBlank() && author.isNullOrBlank()) return null
         return NovelSearchResult(
-            title = title,
+            title = clean.title,
             author = author,
             synopsis = synopsis,
             tags = emptyList(),
@@ -288,25 +380,6 @@ class SiliconFlowNovelSearchService(
         }
     }
 
-    /** Builds the synthesis prompt: strictly ground the model in the real web snippets. */
-    private fun synthesizedPrompt(fullText: String, snippets: String): String = """
-        你是一个小说资料助手。下面是从联网搜索引擎（Tavily/Exa）**真实检索**到的网页片段，请**严格依据这些片段**来识别这本小说并填写资料，不要凭记忆编造。
-
-        OCR 原文（含噪声，可能含书名、作者、章节、简介、正文）：
-        $fullText
-
-        联网检索到的网页片段：
-        $snippets
-
-        要求：
-        1. 从 OCR 与网页片段中识别书名和作者（不要把正文/截图里的人物名当作者）。
-        2. 简介、主角、高光、标签都应基于网页片段内容；片段中找不到的字段留空字符串。
-        3. tags 从题材库原样挑选 3-5 个：${TagCatalog.promptList}
-        4. 严禁编造：找不到可靠依据的字段就返回空字符串。
-        只输出严格 JSON，不要任何解释或 Markdown 代码块：
-        {"title":"","author":"","synopsis":"","protagonist":"","highlights":"","tags":[""],"found":true}
-    """.trimIndent()
-
     private fun webPrompt(fullText: String): String = """
         你是一个小说资料助手，并且**必须先调用联网搜索工具查证**，再回答。
         任务：先识别下面 OCR 文字描述的是哪本小说（书名 + 作者），再**联网搜索**核实其真实资料。
@@ -329,12 +402,12 @@ class SiliconFlowNovelSearchService(
         {"title":"","author":"","synopsis":"","protagonist":"","highlights":"","tags":[""],"found":true,"sources":["标题|URL"]}
     """.trimIndent()
 
-    private fun callModel(model: String, userContent: String, cfg: SearchConfig): String? {
+    private fun callModel(model: String, userContent: String, cfg: SearchConfig, system: String? = null): String? {
         return try {
             val body = JSONObject().apply {
                 put("model", model)
                 put("messages", JSONArray().apply {
-                    put(JSONObject().put("role", "system").put("content", buildSystemPrompt()))
+                    put(JSONObject().put("role", "system").put("content", system ?: buildSystemPrompt()))
                     put(JSONObject().put("role", "user").put("content", userContent))
                 })
                 put("response_format", JSONObject().put("type", "json_object"))
