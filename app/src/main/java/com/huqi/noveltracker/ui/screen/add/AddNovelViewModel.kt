@@ -147,7 +147,7 @@ class AddNovelViewModel(application: Application) : AndroidViewModel(application
                 }
                 feedUserVocabulary()
                 if (!runCatching { searchService.isConfigured() }.getOrDefault(false)) {
-                    _error.value = "请先在「设置」里配置 API Key（可用免费 SiliconFlow key，或在 DeepSeek 预设下填你自己的 key 开启联网搜索）"
+                    _error.value = "请先在「设置」里配置 API Key（填一个 LLM Key 做合成，或在 DeepSeek / Tavily / Exa 预设下填对应 Key 开启联网搜索）"
                     _step.value = AddStep.PICK
                     return@launch
                 }
@@ -202,7 +202,7 @@ class AddNovelViewModel(application: Application) : AndroidViewModel(application
             try {
                 feedUserVocabulary()
                 if (!runCatching { searchService.isConfigured() }.getOrDefault(false)) {
-                    _error.value = "请先在「设置」里配置 API Key（可用免费 SiliconFlow key，或在 DeepSeek 预设下填你自己的 key 开启联网搜索）"
+                    _error.value = "请先在「设置」里配置 API Key（填一个 LLM Key 做合成，或在 DeepSeek / Tavily / Exa 预设下填对应 Key 开启联网搜索）"
                     _step.value = AddStep.PICK
                     return@launch
                 }

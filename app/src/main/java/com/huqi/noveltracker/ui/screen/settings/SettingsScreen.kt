@@ -18,6 +18,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
 import com.huqi.noveltracker.data.settings.Presets
+import com.huqi.noveltracker.data.settings.SearchBackend
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -54,7 +55,13 @@ fun SettingsScreen(
                     Text("DeepSeek（联网搜索）")
                 }
                 OutlinedButton(onClick = { viewModel.applyPreset(Presets.siliconFlow) }) {
-                    Text("SiliconFlow（免费）")
+                    Text("SiliconFlow（免费合成）")
+                }
+                OutlinedButton(onClick = { viewModel.applyPreset(Presets.tavilyWeb) }) {
+                    Text("Tavily 联网")
+                }
+                OutlinedButton(onClick = { viewModel.applyPreset(Presets.exaWeb) }) {
+                    Text("Exa 联网")
                 }
             }
 
@@ -110,6 +117,48 @@ fun SettingsScreen(
                 )
             }
 
+            Text("联网搜索后端（不依赖 DeepSeek 也能真联网）", style = MaterialTheme.typography.titleMedium)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                val backends = listOf(
+                    "无" to SearchBackend.NONE,
+                    "Tavily" to SearchBackend.TAVILY,
+                    "Exa" to SearchBackend.EXA
+                )
+                backends.forEach { (label, backend) ->
+                    FilterChip(
+                        selected = draft.searchBackend == backend,
+                        onClick = { viewModel.update { it.copy(searchBackend = backend) } },
+                        label = { Text(label) }
+                    )
+                }
+            }
+
+            if (draft.searchBackend != SearchBackend.NONE) {
+                OutlinedTextField(
+                    value = draft.searchApiKey,
+                    onValueChange = { newValue -> viewModel.update { it.copy(searchApiKey = newValue) } },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("搜索 API Key（Tavily / Exa）") },
+                    singleLine = true,
+                    visualTransformation = if (showKey) VisualTransformation.None else PasswordVisualTransformation()
+                )
+                OutlinedTextField(
+                    value = draft.searchMaxResults.toString(),
+                    onValueChange = { newValue ->
+                        newValue.toIntOrNull()?.let { n -> viewModel.update { it.copy(searchMaxResults = n.coerceIn(1, 10)) } }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("检索条数（1-10）") },
+                    singleLine = true
+                )
+                Text(
+                    "该后端会真实联网检索，把网页片段交给上面的“对话模型”（如免费 SiliconFlow）合成。" +
+                        "仍需在上方 API Key 填入一个可用的对话模型 Key（合成用）。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                )
+            }
+
             Button(
                 onClick = { viewModel.save(); navController.popBackStack() },
                 modifier = Modifier.fillMaxWidth()
@@ -118,9 +167,9 @@ fun SettingsScreen(
             }
 
             Text(
-                "说明：默认已填入免费 SiliconFlow key，可直接用（仅知识补全，未联网核实）。" +
-                    "想开启真实联网搜索，点「DeepSeek」预设，Base URL 保持默认，并在 API Key 处填入你自己的 DeepSeek key，" +
-                    "再打开「启用联网搜索」后保存。",
+                "说明：本应用不再预填任何 Key，首次使用请在「对话模型」处填入一个可用的 LLM Key（如免费 SiliconFlow 做合成）。" +
+                    "想要真·联网搜索有两条路：① 点「DeepSeek（联网搜索）」预设并填你自己的 DeepSeek key、打开联网开关；" +
+                    "② 点「Tavily 联网」或「Exa 联网」预设，再分别填入搜索 API Key 与一个对话模型 Key，全程免费且真联网。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
             )

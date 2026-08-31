@@ -4,6 +4,7 @@ import android.util.Log
 import com.huqi.noveltracker.data.model.TagCatalog
 import com.huqi.noveltracker.data.repository.NovelSearchResult
 import com.huqi.noveltracker.data.repository.NovelSearchService
+import com.huqi.noveltracker.data.settings.SearchBackend
 import com.huqi.noveltracker.data.settings.SearchConfig
 import com.huqi.noveltracker.data.settings.SettingsRepository
 import kotlinx.coroutines.Dispatchers
@@ -15,6 +16,9 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
+
+/** A single web-search hit returned by Tavily / Exa, used to synthesize the record. */
+private data class SearchHit(val title: String, val url: String, val content: String)
 
 /**
  * Real novel lookup backed by an OpenAI-compatible LLM API. The key, base URL and
@@ -52,7 +56,11 @@ class SiliconFlowNovelSearchService(
     override fun setUserVocabulary(words: List<String>) { personalVocabulary = words }
 
     override suspend fun isConfigured(): Boolean =
-        runCatching { settings.getConfig().apiKey.isNotBlank() }.getOrDefault(false)
+        runCatching {
+            val cfg = settings.getConfig()
+            cfg.apiKey.isNotBlank() ||
+                (cfg.searchBackend != SearchBackend.NONE && cfg.searchApiKey.isNotBlank())
+        }.getOrDefault(false)
 
     override suspend fun search(title: String): NovelSearchResult? = withContext(Dispatchers.IO) {
         val cfg = settings.getConfig()
@@ -64,6 +72,12 @@ class SiliconFlowNovelSearchService(
         //    OCR text, extracts title + author itself, and verifies via web_search.
         if (cfg.webEnabled && cfg.isDeepSeek) {
             searchWeb(query, cfg)?.let { return@withContext it }
+        }
+
+        // 1b) Real web search via a dedicated search API (Tavily/Exa). Their web snippets are
+        //     then synthesized by ANY chat LLM (e.g. free SiliconFlow) — no DeepSeek needed.
+        if (cfg.searchBackend != SearchBackend.NONE && cfg.searchApiKey.isNotBlank()) {
+            searchWebViaSearchApi(query, cfg)?.let { return@withContext it }
         }
 
         // 2) Fallback: knowledge-only generation from the full text. Flagged unverified.
@@ -138,6 +152,127 @@ class SiliconFlowNovelSearchService(
             null
         }
     }
+
+    /**
+     * Grounded lookup that does NOT depend on DeepSeek: a dedicated search API (Tavily/Exa)
+     * returns real web snippets, which we then feed to ANY chat LLM (e.g. free SiliconFlow)
+     * for synthesis. This is the "free + real web search" path the user asked for.
+     */
+    private suspend fun searchWebViaSearchApi(fullText: String, cfg: SearchConfig): NovelSearchResult? {
+        val (title, author) = heuristicTitleAuthor(fullText)
+        val query = buildString {
+            append(title)
+            if (!author.isNullOrBlank()) append(" $author")
+            append(" 小说 简介 作者 资料")
+        }.trim()
+
+        val hits = when (cfg.searchBackend) {
+            SearchBackend.TAVILY -> tavilySearch(query, cfg.searchApiKey, cfg.searchMaxResults)
+            SearchBackend.EXA -> exaSearch(query, cfg.searchApiKey, cfg.searchMaxResults)
+            else -> emptyList()
+        }
+        if (hits.isEmpty()) return null
+
+        val snippets = hits.joinToString("\n\n") { "【${it.title}】(${it.url})\n${it.content}" }
+        val content = callModel(cfg.chatModel, synthesizedPrompt(fullText, snippets), cfg) ?: return null
+        val result = parse(content, title)
+        val hasData = result.author != null || result.synopsis != null ||
+            result.tags.isNotEmpty() || result.title.isNotBlank()
+        if (!hasData) return null
+        val backendName = if (cfg.searchBackend == SearchBackend.TAVILY) "Tavily" else "Exa"
+        return result.copy(
+            source = "AI · 联网搜索($backendName)",
+            found = true,
+            sources = hits.map { "${it.title}|${it.url}" }
+        )
+    }
+
+    /** Tavily search API → real web snippets (free tier ~1000/month). */
+    private fun tavilySearch(query: String, key: String, maxResults: Int): List<SearchHit> {
+        return try {
+            val body = JSONObject().apply {
+                put("api_key", key)
+                put("query", query)
+                put("max_results", maxResults)
+                put("search_depth", "advanced")
+                put("include_answer", false)
+            }.toString()
+            val request = Request.Builder()
+                .url("https://api.tavily.com/search")
+                .addHeader("Content-Type", "application/json")
+                .post(body.toRequestBody(mediaType))
+                .build()
+            val response = client.newCall(request).execute()
+            if (!response.isSuccessful) {
+                Log.w("NovelAI", "tavily http ${response.code}: ${response.message}")
+                return emptyList()
+            }
+            val root = JSONObject(response.body?.string() ?: return emptyList())
+            val arr = root.optJSONArray("results") ?: return emptyList()
+            val hits = mutableListOf<SearchHit>()
+            for (i in 0 until arr.length()) {
+                val o = arr.optJSONObject(i) ?: continue
+                hits.add(SearchHit(o.optString("title", ""), o.optString("url", ""), o.optString("content", "")))
+            }
+            hits
+        } catch (e: Exception) {
+            Log.w("NovelAI", "tavily error: ${e.message}")
+            emptyList()
+        }
+    }
+
+    /** Exa search API → real web snippets (free tier available). */
+    private fun exaSearch(query: String, key: String, maxResults: Int): List<SearchHit> {
+        return try {
+            val body = JSONObject().apply {
+                put("query", query)
+                put("numResults", maxResults)
+                put("contents", JSONObject().put("text", true))
+            }.toString()
+            val request = Request.Builder()
+                .url("https://api.exa.ai/search")
+                .addHeader("Authorization", "Bearer $key")
+                .addHeader("Content-Type", "application/json")
+                .post(body.toRequestBody(mediaType))
+                .build()
+            val response = client.newCall(request).execute()
+            if (!response.isSuccessful) {
+                Log.w("NovelAI", "exa http ${response.code}: ${response.message}")
+                return emptyList()
+            }
+            val root = JSONObject(response.body?.string() ?: return emptyList())
+            val arr = root.optJSONArray("results") ?: return emptyList()
+            val hits = mutableListOf<SearchHit>()
+            for (i in 0 until arr.length()) {
+                val o = arr.optJSONObject(i) ?: continue
+                val text = o.optJSONObject("text")?.optString("text") ?: o.optString("text", "")
+                hits.add(SearchHit(o.optString("title", ""), o.optString("url", ""), text))
+            }
+            hits
+        } catch (e: Exception) {
+            Log.w("NovelAI", "exa error: ${e.message}")
+            emptyList()
+        }
+    }
+
+    /** Builds the synthesis prompt: strictly ground the model in the real web snippets. */
+    private fun synthesizedPrompt(fullText: String, snippets: String): String = """
+        你是一个小说资料助手。下面是从联网搜索引擎（Tavily/Exa）**真实检索**到的网页片段，请**严格依据这些片段**来识别这本小说并填写资料，不要凭记忆编造。
+
+        OCR 原文（含噪声，可能含书名、作者、章节、简介、正文）：
+        $fullText
+
+        联网检索到的网页片段：
+        $snippets
+
+        要求：
+        1. 从 OCR 与网页片段中识别书名和作者（不要把正文/截图里的人物名当作者）。
+        2. 简介、主角、高光、标签都应基于网页片段内容；片段中找不到的字段留空字符串。
+        3. tags 从题材库原样挑选 3-5 个：${TagCatalog.promptList}
+        4. 严禁编造：找不到可靠依据的字段就返回空字符串。
+        只输出严格 JSON，不要任何解释或 Markdown 代码块：
+        {"title":"","author":"","synopsis":"","protagonist":"","highlights":"","tags":[""],"found":true}
+    """.trimIndent()
 
     private fun webPrompt(fullText: String): String = """
         你是一个小说资料助手，并且**必须先调用联网搜索工具查证**，再回答。
