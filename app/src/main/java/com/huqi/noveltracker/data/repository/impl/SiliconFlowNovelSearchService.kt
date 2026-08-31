@@ -64,33 +64,35 @@ class SiliconFlowNovelSearchService(
 
     override suspend fun search(title: String): NovelSearchResult? = withContext(Dispatchers.IO) {
         val cfg = settings.getConfig()
-        if (cfg.apiKey.isBlank()) return@withContext null
         val query = title.trim()
         if (query.isBlank()) return@withContext null
 
-        // 1) Preferred: real web search (DeepSeek only). The model receives the FULL
-        //    OCR text, extracts title + author itself, and verifies via web_search.
-        if (cfg.webEnabled && cfg.isDeepSeek) {
-            searchWeb(query, cfg)?.let { return@withContext it }
-        }
-
-        // 1b) Real web search via a dedicated search API (Tavily/Exa). Their web snippets are
-        //     then synthesized by ANY chat LLM (e.g. free SiliconFlow) — no DeepSeek needed.
+        // 1) Dedicated search API (Tavily / Exa) — standalone, NO LLM required.
+        //    This is the recommended "no DeepSeek" path: real web search that does not
+        //    touch DeepSeek and does not consume its quota.
         if (cfg.searchBackend != SearchBackend.NONE && cfg.searchApiKey.isNotBlank()) {
             searchWebViaSearchApi(query, cfg)?.let { return@withContext it }
         }
 
-        // 2) Fallback: knowledge-only generation from the full text. Flagged unverified.
-        val userContent = "以下是 OCR 文本：\n$query"
-        val content = callModel(cfg.chatModel, userContent, cfg)
-        if (!content.isNullOrBlank()) {
-            return@withContext parse(content, heuristicTitle(query)).copy(
-                source = "AI · 未联网核实",
-                found = false
-            )
+        // 2) DeepSeek native web_search — only when the user explicitly chose DeepSeek
+        //    (backend = NONE + webEnabled + a DeepSeek key). Never runs alongside Tavily/Exa.
+        if (cfg.searchBackend == SearchBackend.NONE && cfg.webEnabled && cfg.isDeepSeek && cfg.apiKey.isNotBlank()) {
+            searchWeb(query, cfg)?.let { return@withContext it }
         }
 
-        // 3) Last resort: at least prefill title/author from OCR so the record isn't empty.
+        // 3) Knowledge-only generation (needs a chat LLM key). Flagged unverified.
+        if (cfg.apiKey.isNotBlank()) {
+            val userContent = "以下是 OCR 文本：\n$query"
+            val content = callModel(cfg.chatModel, userContent, cfg)
+            if (!content.isNullOrBlank()) {
+                return@withContext parse(content, heuristicTitle(query)).copy(
+                    source = "AI · 未联网核实",
+                    found = false
+                )
+            }
+        }
+
+        // 4) Last resort: at least prefill title/author from OCR so the record isn't empty.
         val (t, a) = heuristicTitleAuthor(query)
         NovelSearchResult(title = t, author = a, source = "OCR", found = false)
     }
@@ -154,48 +156,76 @@ class SiliconFlowNovelSearchService(
     }
 
     /**
-     * Grounded lookup that does NOT depend on DeepSeek: a dedicated search API (Tavily/Exa)
-     * returns real web snippets, which we then feed to ANY chat LLM (e.g. free SiliconFlow)
-     * for synthesis. This is the "free + real web search" path the user asked for.
+     * Standalone web lookup via Tavily / Exa. The search API already returns a synthesized
+     * answer (Tavily `answer`, Exa `summary`), so we build the record directly — NO chat LLM
+     * is required, and DeepSeek is never involved. A chat LLM is only used as an OPTIONAL
+     * enhancement when the user also configured one (e.g. for better tag extraction).
      */
-    private suspend fun searchWebViaSearchApi(fullText: String, cfg: SearchConfig): NovelSearchResult? {
-        val (title, author) = heuristicTitleAuthor(fullText)
+    private fun searchWebViaSearchApi(fullText: String, cfg: SearchConfig): NovelSearchResult? {
+        val (title, authorHint) = heuristicTitleAuthor(fullText)
         val query = buildString {
             append(title)
-            if (!author.isNullOrBlank()) append(" $author")
-            append(" 小说 简介 作者 资料")
+            if (!authorHint.isNullOrBlank()) append(" $authorHint")
+            append(" 小说 作者 简介")
         }.trim()
 
-        val hits = when (cfg.searchBackend) {
+        val (hits, answer) = when (cfg.searchBackend) {
             SearchBackend.TAVILY -> tavilySearch(query, cfg.searchApiKey, cfg.searchMaxResults)
             SearchBackend.EXA -> exaSearch(query, cfg.searchApiKey, cfg.searchMaxResults)
-            else -> emptyList()
+            else -> Pair(emptyList<SearchHit>(), null as String?)
         }
-        if (hits.isEmpty()) return null
+        if (hits.isEmpty() && answer.isNullOrBlank()) return null
 
-        val snippets = hits.joinToString("\n\n") { "【${it.title}】(${it.url})\n${it.content}" }
-        val content = callModel(cfg.chatModel, synthesizedPrompt(fullText, snippets), cfg) ?: return null
-        val result = parse(content, title)
-        val hasData = result.author != null || result.synopsis != null ||
-            result.tags.isNotEmpty() || result.title.isNotBlank()
-        if (!hasData) return null
         val backendName = if (cfg.searchBackend == SearchBackend.TAVILY) "Tavily" else "Exa"
-        return result.copy(
-            source = "AI · 联网搜索($backendName)",
+        val top = hits.firstOrNull()
+        val synopsis = (answer ?: top?.content).takeIf { !it.isNullOrBlank() }?.toString()?.take(400)
+        val author = authorHint ?: parseAuthor(top?.content ?: answer ?: "")
+
+        // Optional LLM enhancement — only if a chat key exists. Never blocks the core result.
+        if (cfg.apiKey.isNotBlank()) {
+            val snippets = hits.joinToString("\n\n") { "【${it.title}】(${it.url})\n${it.content}" }
+            val enhanced = runCatching {
+                callModel(cfg.chatModel, synthesizedPrompt(fullText, snippets), cfg)
+            }.getOrNull()?.let { parse(it, title) }
+            if (enhanced != null &&
+                (enhanced.author != null || enhanced.synopsis != null || enhanced.tags.isNotEmpty() || enhanced.title.isNotBlank())
+            ) {
+                return enhanced.copy(
+                    source = "AI · 联网搜索($backendName)",
+                    found = true,
+                    sources = hits.map { "${it.title}|${it.url}" }
+                )
+            }
+        }
+
+        return NovelSearchResult(
+            title = title,
+            author = author,
+            synopsis = synopsis,
+            tags = emptyList(),
+            source = "联网搜索($backendName)",
             found = true,
             sources = hits.map { "${it.title}|${it.url}" }
         )
     }
 
-    /** Tavily search API → real web snippets (free tier ~1000/month). */
-    private fun tavilySearch(query: String, key: String, maxResults: Int): List<SearchHit> {
+    /** Pull an author name out of web-snippet text (handles "作者：xxx" / "作者简介：xxx"). */
+    private fun parseAuthor(text: String): String? {
+        if (text.isBlank()) return null
+        val m = Regex("(?im)(?:作者|著)\\s*[:：]?\\s*([\\u4e00-\\u9fa5A-Za-z0-9_·]{1,20})").find(text)
+        return m?.groupValues?.get(1)?.trim()?.takeIf { it.isNotBlank() }
+    }
+
+    /** Tavily search API → real web snippets + a synthesized answer (free tier ~1000/month). */
+    private fun tavilySearch(query: String, key: String, maxResults: Int): Pair<List<SearchHit>, String?> {
         return try {
             val body = JSONObject().apply {
                 put("api_key", key)
                 put("query", query)
                 put("max_results", maxResults)
                 put("search_depth", "advanced")
-                put("include_answer", false)
+                put("include_answer", true)
+                put("include_raw_content", false)
             }.toString()
             val request = Request.Builder()
                 .url("https://api.tavily.com/search")
@@ -205,29 +235,30 @@ class SiliconFlowNovelSearchService(
             val response = client.newCall(request).execute()
             if (!response.isSuccessful) {
                 Log.w("NovelAI", "tavily http ${response.code}: ${response.message}")
-                return emptyList()
+                return Pair(emptyList<SearchHit>(), null as String?)
             }
-            val root = JSONObject(response.body?.string() ?: return emptyList())
-            val arr = root.optJSONArray("results") ?: return emptyList()
+            val root = JSONObject(response.body?.string() ?: return Pair(emptyList<SearchHit>(), null as String?))
+            val arr = root.optJSONArray("results") ?: org.json.JSONArray()
             val hits = mutableListOf<SearchHit>()
             for (i in 0 until arr.length()) {
                 val o = arr.optJSONObject(i) ?: continue
                 hits.add(SearchHit(o.optString("title", ""), o.optString("url", ""), o.optString("content", "")))
             }
-            hits
+            val answer = root.optString("answer", "").takeIf { it.isNotBlank() }
+            hits to answer
         } catch (e: Exception) {
             Log.w("NovelAI", "tavily error: ${e.message}")
-            emptyList()
+            Pair(emptyList<SearchHit>(), null as String?)
         }
     }
 
     /** Exa search API → real web snippets (free tier available). */
-    private fun exaSearch(query: String, key: String, maxResults: Int): List<SearchHit> {
+    private fun exaSearch(query: String, key: String, maxResults: Int): Pair<List<SearchHit>, String?> {
         return try {
             val body = JSONObject().apply {
                 put("query", query)
                 put("numResults", maxResults)
-                put("contents", JSONObject().put("text", true))
+                put("contents", JSONObject().put("text", true).put("summary", true))
             }.toString()
             val request = Request.Builder()
                 .url("https://api.exa.ai/search")
@@ -238,20 +269,22 @@ class SiliconFlowNovelSearchService(
             val response = client.newCall(request).execute()
             if (!response.isSuccessful) {
                 Log.w("NovelAI", "exa http ${response.code}: ${response.message}")
-                return emptyList()
+                return Pair(emptyList<SearchHit>(), null as String?)
             }
-            val root = JSONObject(response.body?.string() ?: return emptyList())
-            val arr = root.optJSONArray("results") ?: return emptyList()
+            val root = JSONObject(response.body?.string() ?: return Pair(emptyList<SearchHit>(), null as String?))
+            val arr = root.optJSONArray("results") ?: org.json.JSONArray()
             val hits = mutableListOf<SearchHit>()
             for (i in 0 until arr.length()) {
                 val o = arr.optJSONObject(i) ?: continue
                 val text = o.optJSONObject("text")?.optString("text") ?: o.optString("text", "")
-                hits.add(SearchHit(o.optString("title", ""), o.optString("url", ""), text))
+                val summary = o.optString("summary", "")
+                hits.add(SearchHit(o.optString("title", ""), o.optString("url", ""), summary.ifBlank { text }))
             }
-            hits
+            val answer = hits.firstOrNull()?.content?.takeIf { it.isNotBlank() }
+            hits to answer
         } catch (e: Exception) {
             Log.w("NovelAI", "exa error: ${e.message}")
-            emptyList()
+            Pair(emptyList<SearchHit>(), null as String?)
         }
     }
 

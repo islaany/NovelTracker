@@ -147,7 +147,7 @@ class AddNovelViewModel(application: Application) : AndroidViewModel(application
                 }
                 feedUserVocabulary()
                 if (!runCatching { searchService.isConfigured() }.getOrDefault(false)) {
-                    _error.value = "请先在「设置」里配置 API Key（填一个 LLM Key 做合成，或在 DeepSeek / Tavily / Exa 预设下填对应 Key 开启联网搜索）"
+                    _error.value = "请先在「设置 → 联网搜索」填入 Tavily 或 Exa 的 API Key（无需 DeepSeek 即可真联网检索）；可选在「AI 模型」填对话模型 Key 让资料更完整。"
                     _step.value = AddStep.PICK
                     return@launch
                 }
@@ -202,7 +202,7 @@ class AddNovelViewModel(application: Application) : AndroidViewModel(application
             try {
                 feedUserVocabulary()
                 if (!runCatching { searchService.isConfigured() }.getOrDefault(false)) {
-                    _error.value = "请先在「设置」里配置 API Key（填一个 LLM Key 做合成，或在 DeepSeek / Tavily / Exa 预设下填对应 Key 开启联网搜索）"
+                    _error.value = "请先在「设置 → 联网搜索」填入 Tavily 或 Exa 的 API Key（无需 DeepSeek 即可真联网检索）；可选在「AI 模型」填对话模型 Key 让资料更完整。"
                     _step.value = AddStep.PICK
                     return@launch
                 }

@@ -11,7 +11,11 @@ import com.huqi.noveltracker.ui.screen.add.AddNovelScreen
 import com.huqi.noveltracker.ui.screen.backup.BackupScreen
 import com.huqi.noveltracker.ui.screen.detail.DetailScreen
 import com.huqi.noveltracker.ui.screen.home.HomeScreen
+import com.huqi.noveltracker.ui.screen.settings.SettingsAboutScreen
+import com.huqi.noveltracker.ui.screen.settings.SettingsDeepSeekScreen
+import com.huqi.noveltracker.ui.screen.settings.SettingsModelScreen
 import com.huqi.noveltracker.ui.screen.settings.SettingsScreen
+import com.huqi.noveltracker.ui.screen.settings.SettingsSearchScreen
 import com.huqi.noveltracker.ui.screen.tags.TagsScreen
 
 sealed class Screen(val route: String) {
@@ -20,6 +24,10 @@ sealed class Screen(val route: String) {
     object Tags : Screen("tags")
     object Backup : Screen("backup")
     object Settings : Screen("settings")
+    object SettingsSearch : Screen("settings/search")
+    object SettingsModel : Screen("settings/model")
+    object SettingsDeepSeek : Screen("settings/deepseek")
+    object SettingsAbout : Screen("settings/about")
     object Detail : Screen("detail/{novelId}") {
         fun createRoute(novelId: Long) = "detail/$novelId"
     }
@@ -45,6 +53,18 @@ fun AppNavHost(navController: NavHostController = rememberNavController()) {
         }
         composable(Screen.Settings.route) {
             SettingsScreen(navController = navController)
+        }
+        composable(Screen.SettingsSearch.route) {
+            SettingsSearchScreen(navController = navController)
+        }
+        composable(Screen.SettingsModel.route) {
+            SettingsModelScreen(navController = navController)
+        }
+        composable(Screen.SettingsDeepSeek.route) {
+            SettingsDeepSeekScreen(navController = navController)
+        }
+        composable(Screen.SettingsAbout.route) {
+            SettingsAboutScreen(navController = navController)
         }
         composable(
             route = Screen.Detail.route,

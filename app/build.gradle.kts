@@ -12,8 +12,8 @@ android {
         applicationId = "com.huqi.noveltracker"
         minSdk = 26
         targetSdk = 34
-        versionCode = 46
-        versionName = "0.10.0"
+        versionCode = 47
+        versionName = "0.11.0"
 
         vectorDrawables {
             useSupportLibrary = true
