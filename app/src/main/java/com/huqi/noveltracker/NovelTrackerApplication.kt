@@ -2,6 +2,7 @@ package com.huqi.noveltracker
 
 import android.app.Application
 import androidx.core.content.edit
+import com.huqi.noveltracker.BuildConfig
 import com.huqi.noveltracker.data.local.AppDatabase
 import com.huqi.noveltracker.data.repository.NovelRepository
 import com.huqi.noveltracker.data.repository.impl.RoomNovelRepository
@@ -42,6 +43,17 @@ class NovelTrackerApplication : Application() {
             scope.launch {
                 runCatching { container.novelRepository.seedSampleData() }
                 prefs.edit { putBoolean("seeded", true) }
+            }
+        }
+
+        // Seed the build-time built-in search keys into DataStore on first launch, so the app
+        // works out-of-the-box. Never overwrites an existing user configuration.
+        scope.launch {
+            runCatching {
+                settingsRepository.seedBuiltInDefaults(
+                    BuildConfig.SILICONFLOW_API_KEY,
+                    BuildConfig.TAVILY_API_KEY
+                )
             }
         }
     }

@@ -94,6 +94,7 @@ private object Keys {
     val SEARCH_BACKEND = stringPreferencesKey("search_backend")
     val SEARCH_API_KEY = stringPreferencesKey("search_api_key")
     val SEARCH_MAX_RESULTS = intPreferencesKey("search_max_results")
+    val CONFIG_SEEDED = booleanPreferencesKey("config_seeded")
 }
 
 class SettingsRepository(private val context: Context) {
@@ -123,6 +124,46 @@ class SettingsRepository(private val context: Context) {
             prefs[Keys.SEARCH_BACKEND] = config.searchBackend.name
             prefs[Keys.SEARCH_API_KEY] = config.searchApiKey
             prefs[Keys.SEARCH_MAX_RESULTS] = config.searchMaxResults
+        }
+    }
+
+    /**
+     * On first launch, write the build-time built-in keys (injected via BuildConfig from CI
+     * secrets) into DataStore so the app works out-of-the-box without manual setup.
+     * Idempotent and SAFE: never overwrites an existing user configuration. If the build
+     * provided no keys at all, this is a no-op (the user still configures manually).
+     */
+    suspend fun seedBuiltInDefaults(siliconFlowKey: String, tavilyKey: String) {
+        if (siliconFlowKey.isBlank() && tavilyKey.isBlank()) return
+        context.dataStore.edit { prefs ->
+            val already = prefs[Keys.CONFIG_SEEDED] ?: false
+            val hasApi = (prefs[Keys.API_KEY] ?: "").isNotBlank()
+            val hasSearch = (prefs[Keys.SEARCH_API_KEY] ?: "").isNotBlank()
+            if (already || hasApi || hasSearch) return@edit
+            prefs[Keys.API_KEY] = siliconFlowKey
+            prefs[Keys.BASE_URL] = "https://api.siliconflow.cn/v1/"
+            prefs[Keys.CHAT_MODEL] = "deepseek-ai/DeepSeek-V4-Flash"
+            prefs[Keys.SEARCH_MODEL] = ""
+            prefs[Keys.WEB_ENABLED] = false
+            prefs[Keys.SEARCH_BACKEND] = SearchBackend.TAVILY.name
+            prefs[Keys.SEARCH_API_KEY] = tavilyKey
+            prefs[Keys.SEARCH_MAX_RESULTS] = 5
+            prefs[Keys.CONFIG_SEEDED] = true
+        }
+    }
+
+    /** Force-restore the build-time built-in defaults (used by Settings → 恢复默认配置). */
+    suspend fun resetToBuiltIn(siliconFlowKey: String, tavilyKey: String) {
+        context.dataStore.edit { prefs ->
+            prefs[Keys.API_KEY] = siliconFlowKey
+            prefs[Keys.BASE_URL] = "https://api.siliconflow.cn/v1/"
+            prefs[Keys.CHAT_MODEL] = "deepseek-ai/DeepSeek-V4-Flash"
+            prefs[Keys.SEARCH_MODEL] = ""
+            prefs[Keys.WEB_ENABLED] = false
+            prefs[Keys.SEARCH_BACKEND] = SearchBackend.TAVILY.name
+            prefs[Keys.SEARCH_API_KEY] = tavilyKey
+            prefs[Keys.SEARCH_MAX_RESULTS] = 5
+            prefs[Keys.CONFIG_SEEDED] = true
         }
     }
 }

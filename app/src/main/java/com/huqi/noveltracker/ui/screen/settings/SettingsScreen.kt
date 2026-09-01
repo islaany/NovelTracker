@@ -384,7 +384,7 @@ fun SettingsAboutScreen(navController: NavHostController) {
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Text("NovelTracker", style = MaterialTheme.typography.titleMedium)
-            Text("版本：0.11.0 (build 47)", style = MaterialTheme.typography.bodyMedium)
+            Text("版本：0.13.0 (build 49)", style = MaterialTheme.typography.bodyMedium)
             Text(
                 "本地离线 OCR：ML Kit 中文识别",
                 style = MaterialTheme.typography.bodySmall,
@@ -398,15 +398,29 @@ fun SettingsAboutScreen(navController: NavHostController) {
             HorizontalDivider()
             Button(
                 onClick = {
+                    vm.resetToBuiltIn()
+                    vm.save()
+                    navController.popBackStack()
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) { Text("恢复默认配置（含预置 Key）") }
+            Text(
+                "一键恢复应用内置的「硅基流动 + Tavily」默认配置。若你之后改过 Key 又想退回，点这里即可。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+            )
+            Spacer(Modifier.height(8.dp))
+            OutlinedButton(
+                onClick = {
                     vm.update { com.huqi.noveltracker.data.settings.SearchConfig() }
                     vm.save()
                     navController.popBackStack()
                 },
                 modifier = Modifier.fillMaxWidth(),
                 colors = ButtonDefaults.outlinedButtonColors()
-            ) { Text("重置全部设置") }
+            ) { Text("清空全部设置") }
             Text(
-                "重置后所有 Key 与后端选择清空，恢复默认。",
+                "清空后所有 Key 与后端选择归零，恢复空白（需手动重新配置）。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
             )

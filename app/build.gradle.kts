@@ -4,6 +4,18 @@ plugins {
     id("org.jetbrains.kotlin.kapt")
 }
 
+import java.util.Properties
+
+// Built-in search keys are injected at build time from local.properties (populated by CI secrets
+// or a local local.properties). They are then seeded into DataStore on first launch so the app
+// works out-of-the-box, but remain fully editable in the in-app Settings screen.
+val localProperties = Properties().apply {
+    val localFile = rootProject.file("local.properties")
+    if (localFile.exists()) localFile.inputStream().use { load(it) }
+}
+fun localProp(name: String): String =
+    (localProperties[name] as? String)?.takeIf { it.isNotBlank() } ?: ""
+
 android {
     namespace = "com.huqi.noveltracker"
     compileSdk = 34
@@ -12,15 +24,19 @@ android {
         applicationId = "com.huqi.noveltracker"
         minSdk = 26
         targetSdk = 34
-        versionCode = 48
-        versionName = "0.12.0"
+        versionCode = 49
+        versionName = "0.13.0"
 
         vectorDrawables {
             useSupportLibrary = true
         }
 
-        // API key is configured at runtime via the in-app Settings screen (DataStore),
-        // so no secret is compiled into the build. See data/settings/SettingsRepository.
+        // Built-in search keys are injected at build time from local.properties (CI secrets),
+        // then seeded into DataStore on first launch so the app works without manual setup.
+        // They remain fully editable in the in-app Settings screen. The literal string below
+        // is empty unless local.properties provides a value, so the public source has no key.
+        buildConfigField("String", "SILICONFLOW_API_KEY", "\"${localProp("siliconflow.api.key")}\"")
+        buildConfigField("String", "TAVILY_API_KEY", "\"${localProp("tavily.api.key")}\"")
     }
 
     signingConfigs {

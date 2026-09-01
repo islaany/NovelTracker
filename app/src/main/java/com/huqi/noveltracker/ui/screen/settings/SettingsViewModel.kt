@@ -3,6 +3,7 @@ package com.huqi.noveltracker.ui.screen.settings
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.huqi.noveltracker.BuildConfig
 import com.huqi.noveltracker.appContainer
 import com.huqi.noveltracker.data.settings.SearchConfig
 import com.huqi.noveltracker.data.settings.SettingsRepository
@@ -24,4 +25,14 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun applyPreset(preset: SearchConfig) { _draft.value = preset }
 
     fun save() { viewModelScope.launch { runCatching { repo.save(_draft.value) } } }
+
+    /** Restore the build-time built-in defaults (SiliconFlow + Tavily), then refresh the draft. */
+    fun resetToBuiltIn() {
+        viewModelScope.launch {
+            runCatching {
+                repo.resetToBuiltIn(BuildConfig.SILICONFLOW_API_KEY, BuildConfig.TAVILY_API_KEY)
+                _draft.value = repo.getConfig()
+            }
+        }
+    }
 }
